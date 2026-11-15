@@ -216,7 +216,9 @@ CI_ENABLE_METAL_GPU = "0"
 # The macOS kernel collection (137 MiB), the Data seed (20 MiB) and the GPU addon (the Metal plugin and Turnip, zlib-compressed).
 # iPadOS 17 and 26 images boot on this device with 208 MiB.
 # 12 GiB unit (local): the payload files take 180 MiB here (the community payload fits 187), and the test images
-# are RAM-booted, so the volume stays at the 200 MiB this branch used before the merge.
+# are RAM-booted, so the volume stays at the 200 MiB this branch used before the merge. That is above the 193 MiB the
+# qualified transport (crossdarwin/boot/qualified-macos-transport, 187 MiB) leaves, so this payload goes into this
+# branch's v4 images (local-tools/make-bootimg-v4.py), not the qualified v0 template.
 "size_mib" = 200
 # GPU as on iPadOS 27: fb-bgra=1 renders in system memory with transient attachments in GMEM (Turnip patches), fb-gpu=1 hands the
 # compositor's frames to the render server's GPU copy when the display cannot scan them out directly (dpu-scanout=2).
