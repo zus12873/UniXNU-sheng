@@ -31,7 +31,7 @@ exports nodes with `unixnu,adt-name`.
 `ShengHidInput` and `ShengNovatekTouch` provide the input integration.
 `QcomGeniSpi` provides the shared SPI controller interface.
 `Ath12kWifi` supplies the Wi-Fi stack through board PCIe, MSI, DMA,
-and network interfaces. The payload volume is 208 MiB. The device selects
+and network interfaces. The OS profile selects the payload capacity. The device selects
 sRGB display properties and a 120 Hz display timing request.
 
 ## Development record
@@ -75,6 +75,18 @@ UNIXNU_UNIQUE_CHIP_ID=<8 hex digits> scripts/package.sh --os 27 --uefi ../uefi-s
 
 See the [packaging script](https://unixnu.com/porting/packaging) page for the
 fixed steps, the board.toml keys and the verification the run performs.
+
+### First macOS boot
+
+After flashing a fresh userdata image, select **Initialize macOS Data and boot**
+and confirm **Initialize Data and boot**. This erases macOS Data and initializes
+its persistent store from the installation seed. The seed determines the account
+and Setup Assistant settings. Select **Boot** on subsequent starts to retain Data.
+
+The macOS profile keeps the qualified firmware transport and inserts DarwinBoot
+from the current firmware build. Its SHA-256-pinned template is cached by UniXNU;
+`boot/boot.json` records the selected inputs. The menu waits for input. The
+187 MiB payload must fit within the 193 MiB boot-image limit.
 
 ## Build on GitHub
 
