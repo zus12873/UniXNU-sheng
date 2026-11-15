@@ -212,7 +212,9 @@ CI_ENABLE_METAL_GPU = "0"
 
 ["os_overrides"."macos-27.3-26C5035r"."payload"]
 # 12 GiB unit (local): no Data initialization entry in test payloads (local-tools refuse any data-reset), and the
-# menu keeps its countdown instead of waiting for a key ("timeout" = -1 upstream), as before the merge.
+# menu keeps its countdown instead of waiting for a key ("timeout" = -1 upstream), as before the merge. The confirmed
+# "Initialize macOS Data and boot" entry of crossdarwin/boot/explicit-macos-data (UniXNU-sheng#102) is left out here for
+# that reason; a payload meant for initializing Data takes it back with payload.install below the remove list.
 # The macOS kernel collection (137 MiB), the Data seed (20 MiB) and the GPU addon (the Metal plugin and Turnip, zlib-compressed).
 # iPadOS 17 and 26 images boot on this device with 208 MiB.
 # 12 GiB unit (local): the payload files take 180 MiB here (the community payload fits 187), and the test images
