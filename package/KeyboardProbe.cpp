@@ -34,6 +34,10 @@ extern "C" {
 #include "Wn8030.h"
 #include "QcomRpmh.h"
 #include "TouchBoard.h"
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+#include <IOKit/pwr_mgt/RootDomain.h>
+#include "LidClamshell.h"
+#endif
 }
 
 extern kmod_info_t g_kernel_kmod_info;
@@ -474,9 +478,23 @@ void detachCover() {
     native_keyboard_stats[8] = native_keyboard_stats[8] & ~0xff;
 }
 
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+lid_clamshell gClamshell = LID_CLAMSHELL_INIT;   // the keyboard thread's only
+#endif
+
 void publishLid(bool closed, bool changed) {
     __atomic_store_n(&native_keyboard_lid_closed, closed ? 1u : 0u, __ATOMIC_RELEASE);
     if (changed) IOLog("sheng keyboard: lid %s\n", closed ? "closed" : "open");
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+    // macOS's power manager follows the lid (LidClamshell.h): closed, WindowServer turns the built-in display off. The root domain
+    // queues the message, so this thread does not wait on it.
+    IOPMrootDomain *root = IOService::getPMRootDomain();
+    if (!root) return;
+    const lid_clamshell_message message = lid_clamshell_step(&gClamshell, closed);
+    if (message == LidClamshellNone) return;
+    root->receivePowerNotification(message == LidClamshellClosed ? kIOPMClamshellClosed : kIOPMClamshellOpened);
+    IOLog("sheng keyboard: clamshell %s sent to the power manager\n", message == LidClamshellClosed ? "closed" : "open");
+#endif
 }
 
 void readHall() {
