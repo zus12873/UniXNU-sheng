@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // The touchscreen follows the keyboard cover's lid (macOS). Closed over the screen, the cover lies on the glass and the panel reports
 // up to ten contacts that come and go about 120 times a second; macOS's WindowServer takes no touchscreen events ("Invalid event
-// type: 11") and its gesture handling stopped answering after such a flood (2026-11-15, cover closed for five minutes). While the lid
-// is closed the first frame is published with no contacts, so every contact lifts, and later frames are dropped; opening the cover
-// passes frames again. KeyboardProbe.cpp owns the lid's hall sensor (GPIO 171) and publishes it in native_keyboard_lid_closed once
-// its thread serves the cover, so a cover that never comes up leaves the touchscreen as it was. Host-tested by tests/touch_lid_host.c.
+// type: 11") and its gesture handling stops answering under such a stream. While the lid is closed the first frame is published with
+// no contacts, so every contact lifts, and later frames are dropped; opening the cover passes frames again. KeyboardProbe.cpp owns the
+// lid's hall sensor (GPIO 171) and publishes it in native_keyboard_lid_closed once its thread serves the cover, so a cover that never
+// comes up leaves the touchscreen as it was. Host-tested by tests/touch_lid_host.c.
 #ifndef SHENG_TOUCH_LID_H
 #define SHENG_TOUCH_LID_H
 #include <stdint.h>
