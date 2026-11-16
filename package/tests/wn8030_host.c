@@ -280,6 +280,44 @@ int main(int argc, char **argv)
         /* A finger lifting ends the scroll: what was pending does not become pointer movement. */
         FINGER(1, 0, 0, 0, 0);
         CHECK(wn8030_pointer_report(&st, r, o) == 0 && !st.scroll_y && !st.move_x && !st.move_y);
+
+        /* Reports with their arrival time. The controller can keep a finger's contact id across a lift and a new touch, and the
+         * report of the lift may never arrive: the touch then reads as one finger that leapt from where it lifted to where it landed.
+         * A report more than WN8030_POINTER_GAP_MS after the one before starts from where the finger is, as a new touch does. */
+        memset(&st, 0, sizeof st); memset(r, 0, sizeof r); r[0] = WN8030_TOUCHPAD_ID;
+        FINGER(0, 1, 3, 1000, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 5000, o) == 0);
+        FINGER(0, 1, 3, 1013, 1000);                                        /* 13 ms later, the usual interval while moving */
+        CHECK(wn8030_pointer_report_at(&st, r, 5013, o) == WN8030_POINTER_REPORT && S16(o + 2) == 13 && !S16(o + 4));
+        FINGER(0, 1, 3, 2500, 300);                                         /* the same id 150 ms later, far away: a new touch */
+        CHECK(wn8030_pointer_report_at(&st, r, 5163, o) == 0 && !st.move_x && !st.move_y && st.x == 2500 && st.y == 300);
+        FINGER(0, 1, 3, 2504, 300);                                         /* and it moves on from there */
+        CHECK(wn8030_pointer_report_at(&st, r, 5176, o) == WN8030_POINTER_REPORT && S16(o + 2) == 4 && !S16(o + 4));
+        FINGER(0, 1, 3, 2510, 300);                                         /* exactly the limit apart: still the same touch */
+        CHECK(wn8030_pointer_report_at(&st, r, 5176 + WN8030_POINTER_GAP_MS, o) == WN8030_POINTER_REPORT && S16(o + 2) == 6);
+        FINGER(0, 1, 3, 2600, 300);                                         /* one millisecond past it: a new touch */
+        CHECK(wn8030_pointer_report_at(&st, r, 5177 + 2 * WN8030_POINTER_GAP_MS, o) == 0 && st.x == 2600);
+        /* The millisecond count wraps: 13 ms across the wrap is 13 ms. */
+        memset(&st, 0, sizeof st);
+        FINGER(0, 1, 3, 1000, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 0xfffffff8u, o) == 0);
+        FINGER(0, 1, 3, 1009, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 5u, o) == WN8030_POINTER_REPORT && S16(o + 2) == 9);
+        /* Two fingers that pause and land elsewhere neither scroll nor keep what was pending. */
+        memset(&st, 0, sizeof st);
+        FINGER(0, 1, 1, 1000, 1000); FINGER(1, 1, 2, 1400, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 100, o) == 0);
+        FINGER(0, 1, 1, 1000, 1040); FINGER(1, 1, 2, 1400, 1040);
+        CHECK(wn8030_pointer_report_at(&st, r, 113, o) == 0 && st.scroll_y == 40);
+        FINGER(0, 1, 1, 1000, 1900); FINGER(1, 1, 2, 1400, 1900);
+        CHECK(wn8030_pointer_report_at(&st, r, 400, o) == 0 && !st.scroll_y && !st.scroll_x);
+        /* A held click is not released by a pause. */
+        memset(&st, 0, sizeof st); FINGER(1, 0, 0, 0, 0);
+        FINGER(0, 1, 3, 1000, 1000); r[1] = 1;
+        CHECK(wn8030_pointer_report_at(&st, r, 100, o) == WN8030_POINTER_REPORT && o[1] == 1);
+        FINGER(0, 1, 3, 1500, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 400, o) == 0 && st.buttons == 1);
+        r[1] = 0;
 #undef FINGER
 #undef S16
     }

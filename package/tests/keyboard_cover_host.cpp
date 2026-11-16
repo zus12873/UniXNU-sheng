@@ -72,8 +72,28 @@ int main() {
     first.join(); second.join();
     CHECK(reports.size() == 3001 && allocations == allocated);
     for (unsigned i = 2001; i < reports.size(); ++i) CHECK(reports[i].size() == (reports[i][0] == 5 ? 9 : 3));
+#if NATIVE_COVER_POINTER
+    // The touchpad report carries no time; the device stamps each one as it arrives. A finger whose lift was never reported and
+    // that lands far away after a pause starts from there instead of moving the pointer by the whole distance.
+    auto touch = [&](uint64_t ms, uint16_t x) {
+        uint8_t pad[WN8030_TOUCHPAD_REPORT] = {WN8030_TOUCHPAD_ID, 0, 7, 3, uint8_t(x), uint8_t(x >> 8), 0xe8, 0x03};
+        pad[WN8030_TOUCHPAD_REPORT - 1] = 1;
+        hostClockNs = ms * 1000000;
+        const size_t before = reports.size();
+        cover->submit(pad, sizeof pad);
+        return reports.size() == before ? 0 : int16_t(reports.back()[2] | reports.back()[3] << 8);
+    };
+    CHECK(touch(1000, 1000) == 0);
+    CHECK(touch(1013, 1013) == 13);
+    CHECK(touch(1163, 2500) == 0);   // 150 ms later, 1487 counts away
+    CHECK(touch(1176, 2504) == 4);
+    CHECK(reports.back().size() == WN8030_POINTER_REPORT && reports.back()[0] == WN8030_POINTER_ID);
+    const size_t stamped = reports.size();
+#else
+    const size_t stamped = 3001;
+#endif
     cover->stop(&provider); cover->submit(key, sizeof key);
-    CHECK(reports.size() == 3001 && allocations == allocated);
+    CHECK(reports.size() == stamped && allocations == allocated);
     cover->release(); CHECK(liveObjects == baseline);
     std::printf("PASS keyboard HID (%s): %u checks\n", NATIVE_COVER_POINTER ? "macOS" : "iPadOS", checks);
 }

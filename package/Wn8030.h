@@ -144,9 +144,17 @@ struct wn8030_pointer {
     int32_t x, y;            /* where the finger (or the fingers' centre) was */
     int32_t move_x, move_y;  /* motion not yet sent, in controller counts */
     int32_t scroll_x, scroll_y;
+    uint32_t at_ms;          /* when the report before arrived (wn8030_pointer_report_at) */
 };
 unsigned wn8030_pointer_report(struct wn8030_pointer *state, const uint8_t touchpad[WN8030_TOUCHPAD_REPORT],
                                uint8_t out[WN8030_POINTER_REPORT]);
+/* The same with the report's arrival time in milliseconds (any origin; the count may wrap). A report more than
+ * WN8030_POINTER_GAP_MS after the one before starts from where the fingers are, like a new touch, and drops what was pending: the
+ * controller can keep a finger's contact id across a lift and the next touch, and when the report of the lift is lost the touch
+ * would read as one leap from where the finger lifted to where it landed. While a finger moves, reports come about every 13 ms. */
+#define WN8030_POINTER_GAP_MS 60u
+unsigned wn8030_pointer_report_at(struct wn8030_pointer *state, const uint8_t touchpad[WN8030_TOUCHPAD_REPORT], uint32_t now_ms,
+                                  uint8_t out[WN8030_POINTER_REPORT]);
 
 /* The reports that release every key, consumer usage and finger (input gated off). */
 void wn8030_release_reports(uint8_t keyboard[WN8030_KEYBOARD_REPORT], uint8_t consumer[WN8030_CONSUMER_REPORT],

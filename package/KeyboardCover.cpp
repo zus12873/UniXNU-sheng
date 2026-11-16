@@ -17,8 +17,9 @@
 // as the cover is open: the display dimmed and slept, and no key did anything), and its HID event driver makes no pointer events from a
 // touchpad's finger collections ("createEventForDigitizerCollection generates null event"; only Apple's own trackpads have a driver).
 // There the device is a keyboard and a pointer: the touchpad report becomes relative motion, scroll steps and two buttons
-// (Wn8030.c wn8030_pointer_report), and the folded cover is silenced by KeyboardProbe.cpp alone.
+// (Wn8030.c wn8030_pointer_report_at, with each report's arrival time), and the folded cover is silenced by KeyboardProbe.cpp alone.
 #include <IOKit/hid/IOHIDDevice.h>
+#include <kern/clock.h>
 #include "Wn8030.h"
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOWorkLoop.h>
@@ -135,7 +136,8 @@ public:
         uint8_t moved[WN8030_POINTER_REPORT];
         if (bytes[0] == kTouchpadId) {
             if (length != WN8030_TOUCHPAD_REPORT) return;
-            length = wn8030_pointer_report(&pointer, bytes, moved);
+            uint64_t ns; absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+            length = wn8030_pointer_report_at(&pointer, bytes, static_cast<uint32_t>(ns / 1000000), moved);
             if (!length) return;
             bytes = moved;
         }
