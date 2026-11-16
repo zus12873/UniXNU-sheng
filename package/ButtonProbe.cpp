@@ -15,6 +15,7 @@
 #include <pexpert/pexpert.h>
 extern "C" {
 #include "BootResetCore.h"
+#include "ShengSleep.h"
 }
 
 extern "C" int armcpu_spi_attach(uint32_t, bool, void (*)(void *), void *, uint32_t *, uint64_t *) __attribute__((weak_import));
@@ -39,6 +40,8 @@ int gPon = -1, gGpio = -1;
 uint32_t gApids;
 volatile uint32_t gEvents;
 void (*volatile gSink)(void *, uint32_t);
+// Set by sheng_buttons_sleep_check when the power key woke the system: the thread then reports neither that press nor its release.
+int gSwallowPower;
 void *volatile gSinkContext;
 
 bool mapWindow(Window &w, uint64_t base, uint64_t size) {
@@ -180,7 +183,12 @@ void buttonsThread(void *, wait_result_t) {
     if (!setup()) return;
     uint32_t seen = gEvents, last = 0;
     for (;;) {
-        const uint32_t mask = pressed();
+        uint32_t mask = pressed();
+        int swallow = __atomic_load_n(&gSwallowPower, __ATOMIC_ACQUIRE);
+        if (swallow) {
+            if (!sheng_sleep_swallow(&swallow, (mask & kReportPower) != 0)) mask &= ~kReportPower;
+            __atomic_store_n(&gSwallowPower, swallow, __ATOMIC_RELEASE);
+        }
         if (mask != last) {
             last = mask;
             native_buttons_stats[3] = (int32_t)mask;
@@ -194,6 +202,35 @@ void buttonsThread(void *, wait_result_t) {
     }
 }
 }  // namespace
+
+// Platform sleep (ShengSleep.cpp), on the boot core alone with interrupts masked: whether the power key was pressed, by its arbiter
+// status (latched, so a short press already over counts) or its real-time status. That press stays latched for buttonsIrq after the
+// wake, and the thread does not report it or its release. Every other status behind the line, the volume keys' included, is cleared
+// as buttonsIrq does, so that the line drops while the system sleeps on.
+extern "C" int sheng_buttons_sleep_check(void) {
+    if (native_buttons_stats[0] != 3 || gPon < 0) return 0;
+    int wake = 0;
+    for (uint32_t word = 0; word * 32 < gApids; ++word) {
+        uint32_t pending = gIntr.va[word];
+        while (pending) {
+            const int apid = (int)(word * 32 + __builtin_ctz(pending));
+            pending &= pending - 1;
+            if (apid != gPon && apid != gGpio) {
+                *apidReg(apid, kIrqClear) = 0xff;
+                native_buttons_stats[6] = native_buttons_stats[6] + 1;
+                continue;
+            }
+            const uint32_t status = *apidReg(apid, kIrqStatus);
+            uint8_t rt = 0;
+            if (apid == gPon && (br_read8(gObs.va, &gArb, gPon, kRtSts, &rt), sheng_sleep_power_wakes(rt, status))) {wake = 1; continue;}
+            *apidReg(apid, kIrqClear) = status;
+            if (status) br_write8(gChn.va, apid, kLatchedClr, (uint8_t)status);
+        }
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+    if (wake) __atomic_store_n(&gSwallowPower, 1, __ATOMIC_RELEASE);
+    return wake;
+}
 
 extern "C" void native_buttons_set_sink(void (*sink)(void *, uint32_t), void *context) {
     gSinkContext = context;
