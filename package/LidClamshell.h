@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // macOS's power manager follows the keyboard cover's lid (KeyboardProbe.cpp publishLid). Told that the clamshell closed, the root
-// domain notifies its interest clients, and WindowServer turns the built-in display off; it would also sleep the system, but this
-// board's device tree sets /defaults sleep-disabled, so IOPMrootDomain::privateSleepSystem refuses (checkSystemSleepAllowed). Told
-// that it opened, the display comes back. Only changes are told: the hall sensor is also polled once a second, and the root domain
-// takes the lid as open until told otherwise, so an open lid at start is not told. Host-tested by tests/lid_clamshell_host.c.
+// domain notifies its interest clients, and WindowServer turns the built-in display off. It also sleeps the system when sleep is allowed:
+// the board's device tree sets /defaults sleep-disabled, which only platform sleep (boot-arg platform-sleep=1, ShengSleep.cpp) lifts.
+// Told that it opened (as user input, which turns a dark wake full), the display comes back. Only changes are told: the hall sensor is
+// also polled once a second, and the root domain takes the lid as open until told otherwise, so an open lid at start is not told.
+// Host-tested by tests/lid_clamshell_host.c.
 #ifndef SHENG_LID_CLAMSHELL_H
 #define SHENG_LID_CLAMSHELL_H
 #include <stdint.h>
@@ -27,8 +28,8 @@ static inline enum lid_clamshell_message lid_clamshell_step(struct lid_clamshell
 
 // The backlight level written to the panel (AppleARMBacklight.cpp sheng_backlight_lid): none while the lid is closed. Told the clamshell
 // closed, macOS's WindowServer passes it to the framebuffer (logged "clamshell state:2 sent to IOMFB") and leaves the panel to the
-// system sleep that follows on a Mac; this board refuses that sleep, so the backlight driver darkens the panel itself. The level the
-// system asked for is kept and published, and comes back when the lid opens.
+// system sleep that follows on a Mac; the panel has no power switch of its own, so the backlight driver darkens it itself, with or
+// without that sleep. The level the system asked for is kept and published, and comes back when the lid opens.
 static inline uint32_t lid_backlight_level(uint32_t level, bool closed)
 {
     return closed ? 0 : level;

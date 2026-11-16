@@ -2,8 +2,9 @@
 // sheng's wake sources for platform sleep (boot-arg platform-sleep=1; drivers/ArmCpu/ArmCpuSleep.h), the logic ShengSleep.cpp and
 // ButtonProbe.cpp apply while the boot core waits alone with interrupts masked:
 // - the lid: the hall sensor on TLMM GPIO 171 (active low: 0 closed), on the TLMM summary interrupt, SPI 208 (INTID 240). Asleep, every
-//   other pin's INTR_CFG enable is off, so that only the lid can raise the summary. When the lid was closed as the sleep began, the lid
-//   pin is level high while asleep: a lid opened before the wait started keeps the interrupt pending, so the wait ends at once.
+//   other pin that interrupts the application processor has its INTR_CFG enable off, so that only the lid can raise the summary. When
+//   the lid was closed as the sleep began (or is closed when the wait is prepared), the lid pin is level high while asleep: a lid opened
+//   before the wait started keeps the interrupt pending, so the wait ends at once.
 // - the power key: PMK8550 PON interrupt bit 7, on the SPMI arbiter's interrupt (PDC pin 1, SPI 481, INTID 513). Pressed in its
 //   real-time status or in its latched status (a short press may be over before the check runs).
 // The press that woke the system and its release are not reported to macOS. Host-tested by tests/sheng_sleep_host.c.
@@ -22,10 +23,14 @@
 #define SHENG_SLEEP_INTR_ENABLE 1u
 #define SHENG_SLEEP_INTR_POLARITY (1u << 1)
 #define SHENG_SLEEP_INTR_DETECTION (3u << 2)
+// INTR_CFG bits 7:5, the processor the pin interrupts: 3 the application processor (KeyboardProbe.cpp sets it so).
+#define SHENG_SLEEP_INTR_TARGET(cfg) (((cfg) >> 5) & 7u)
+#define SHENG_SLEEP_TARGET_AP 3u
 #define SHENG_SLEEP_POWER_BIT 0x80u
-// armcpu_sleep_stats.last_reason (ArmCpuSleep.h: ArmcpuWakeSource, ArmcpuWakeTimer).
+// armcpu_sleep_stats.last_reason (ArmCpuSleep.h: ArmcpuWakeSource, ArmcpuWakeTimer, ArmcpuWakeStorm).
 #define SHENG_SLEEP_ARMCPU_SOURCE 1u
 #define SHENG_SLEEP_ARMCPU_TIMER 2u
+#define SHENG_SLEEP_ARMCPU_STORM 3u
 
 enum sheng_wake_source {ShengWakeNone, ShengWakeLid, ShengWakePower};
 
@@ -35,11 +40,14 @@ static inline int sheng_sleep_pin_usable(uint32_t gpio)
            !(gpio >= SHENG_SLEEP_RESERVED_FIRST && gpio < SHENG_SLEEP_RESERVED_FIRST + SHENG_SLEEP_RESERVED_COUNT);
 }
 
-// The INTR_CFG values while asleep: every pin's enable off except the lid's, which is left as it is (sheng_sleep_lid_cfg sets it).
+// The INTR_CFG values while asleep: the enable off on every pin that interrupts the application processor, except the lid's, which is
+// left as it is (sheng_sleep_lid_cfg sets it). Pins routed to another processor are that processor's and stay as they are.
 static inline void sheng_sleep_tlmm_keep(const uint32_t cfg[SHENG_SLEEP_GPIO_COUNT], uint32_t out[SHENG_SLEEP_GPIO_COUNT])
 {
-    for (uint32_t i = 0; i < SHENG_SLEEP_GPIO_COUNT; ++i)
-        out[i] = i == SHENG_SLEEP_LID_GPIO ? cfg[i] : cfg[i] & ~SHENG_SLEEP_INTR_ENABLE;
+    for (uint32_t i = 0; i < SHENG_SLEEP_GPIO_COUNT; ++i) {
+        const int ours = i != SHENG_SLEEP_LID_GPIO && SHENG_SLEEP_INTR_TARGET(cfg[i]) == SHENG_SLEEP_TARGET_AP;
+        out[i] = ours ? cfg[i] & ~SHENG_SLEEP_INTR_ENABLE : cfg[i];
+    }
 }
 
 // The lid pin's INTR_CFG while asleep: level high and enabled when the lid was closed as the sleep began, else unchanged.
@@ -66,12 +74,14 @@ static inline int sheng_sleep_swallow(int *pending, int pressed)
     return 0;
 }
 
-// For the wake log line: a source the board accepted, else the wake-after timer, else nothing (a sleep that did not wait).
+// For the wake log line: a source the board accepted, else the wake-after timer, a storm (a line kept firing and nothing was left to
+// wake the system), or nothing (a sleep that did not wait).
 static inline const char *sheng_sleep_woke_by(uint32_t armcpu_reason, int source)
 {
     if (source == ShengWakeLid) return "lid";
     if (source == ShengWakePower) return "power";
-    return armcpu_reason == SHENG_SLEEP_ARMCPU_TIMER ? "timer" : "nothing";
+    if (armcpu_reason == SHENG_SLEEP_ARMCPU_TIMER) return "timer";
+    return armcpu_reason == SHENG_SLEEP_ARMCPU_STORM ? "storm" : "nothing";
 }
 
 #endif

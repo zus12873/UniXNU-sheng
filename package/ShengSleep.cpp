@@ -31,17 +31,26 @@ struct armcpu_sleep_board {
     void (*restore)(void);
     const uint32_t *wake_spis;
     uint32_t wake_spi_count;
+    void (*tick)(void);
+    uint32_t tick_s;
 };
 struct armcpu_sleep_stats {
     uint32_t phase, entries, spurious, last_intid, last_reason, cpu_off_failures;
     uint64_t asleep_ticks;
+    uint32_t masked, ticks, unarmed;
 };
+// ArmCpuSleep.h's ARMCPU_SLEEP_BOARD_SIZE and ARMCPU_SLEEP_STATS_SIZE, which its host test checks on the driver's side.
+static_assert(sizeof(armcpu_sleep_board) == 56, "armcpu_sleep_board differs from ArmCpuSleep.h");
+static_assert(sizeof(armcpu_sleep_stats) == 48, "armcpu_sleep_stats differs from ArmCpuSleep.h");
 extern "C" int armcpu_sleep_register(const struct armcpu_sleep_board *) __attribute__((weak_import));
 extern "C" volatile struct armcpu_sleep_stats armcpu_sleep_stats __attribute__((weak_import));
 extern "C" int sheng_buttons_sleep_check(void) __attribute__((weak_import));   // ButtonProbe.cpp
+extern "C" void boot_reset_watchdog_ping(void) __attribute__((weak_import));   // BootReset.c
+extern "C" {extern volatile int32_t native_buttons_stats[10] __attribute__((weak_import));}
+extern "C" {extern volatile int32_t native_keyboard_stats[17] __attribute__((weak_import));}
 // [0] stage (1 probing, 2 registered, negatives: the step that failed), [1] sleeps, [2] lid wakes, [3] power wakes, [4] lid reads closed
-// while asleep, [5] last registration answer
-extern "C" {volatile int32_t sheng_sleep_stats[6];}
+// while asleep, [5] last registration answer, [6] will-sleep notifications, [7] has-powered-on notifications
+extern "C" {volatile int32_t sheng_sleep_stats[8];}
 
 namespace {
 constexpr uint32_t kIo = 0x4, kIntrCfg = 0x8, kIntrStatus = 0xc;
@@ -64,7 +73,8 @@ void prepare() {
     gSource = ShengWakeNone;
     for (uint32_t i = 0; i < SHENG_SLEEP_GPIO_COUNT; ++i) gSaved[i] = sheng_sleep_pin_usable(i) ? *reg(i, kIntrCfg) : 0;
     sheng_sleep_tlmm_keep(gSaved, gAsleep);
-    gAsleep[SHENG_SLEEP_LID_GPIO] = sheng_sleep_lid_cfg(gSaved[SHENG_SLEEP_LID_GPIO], gLidClosedAtSleep);
+    // Closed as the sleep began, or now: a sleep again from a dark wake gets no will-sleep notification.
+    gAsleep[SHENG_SLEEP_LID_GPIO] = sheng_sleep_lid_cfg(gSaved[SHENG_SLEEP_LID_GPIO], gLidClosedAtSleep || lidClosed());
     for (uint32_t i = 0; i < SHENG_SLEEP_GPIO_COUNT; ++i) {
         if (sheng_sleep_pin_usable(i) && gAsleep[i] != gSaved[i]) *reg(i, kIntrCfg) = gAsleep[i];
     }
@@ -95,7 +105,23 @@ void restore() {
     if (gSource == ShengWakePower) sheng_sleep_stats[3] = sheng_sleep_stats[3] + 1;
 }
 
-const armcpu_sleep_board gBoard = {prepare, shouldWake, restore, kWakeSpis, sizeof kWakeSpis / sizeof kWakeSpis[0]};
+// Every 10 s while asleep, as BootReset.c's watchdog thread does while awake: an armed hypervisor watchdog (30 s) would reset the
+// sleeping system. Nothing when the kernel does not ping it.
+void tick() {
+    if (boot_reset_watchdog_ping) boot_reset_watchdog_ping();
+}
+
+const armcpu_sleep_board gBoard = {prepare, shouldWake, restore, kWakeSpis, sizeof kWakeSpis / sizeof kWakeSpis[0], tick, 10};
+
+// The wake sources a sleep can count on: the keyboard probe past its interrupt step (stage 5 and on) holds the TLMM summary, the
+// buttons armed (stage 3) hold the SPMI line.
+bool lidArmed() {return &native_keyboard_stats && native_keyboard_stats[0] >= 5;}
+bool powerArmed() {return &native_buttons_stats && native_buttons_stats[0] == 3 && sheng_buttons_sleep_check;}
+uint64_t counterMs(uint64_t ticks) {
+    uint64_t hz;
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(hz));
+    return hz ? ticks / (hz / 1000) : 0;
+}
 
 #if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
 IOReturn sleepWake(void *, void *, natural_t message, IOService *, void *, vm_size_t) {
@@ -103,17 +129,20 @@ IOReturn sleepWake(void *, void *, natural_t message, IOService *, void *, vm_si
     switch (message) {
     case kIOMessageSystemWillSleep:
         gLidClosedAtSleep = lidClosed();
-        IOLog("sheng sleep: sleeping, lid %s\n", gLidClosedAtSleep ? "closed" : "open");
+        sheng_sleep_stats[6] = sheng_sleep_stats[6] + 1;
+        IOLog("sheng sleep: sleeping, lid %s; wakes by lid %s, power key %s\n", gLidClosedAtSleep ? "closed" : "open",
+              lidArmed() ? "yes" : "NO", powerArmed() ? "yes" : "NO");
         break;
     case kIOMessageSystemWillPowerOn:
         if (root && gSource != ShengWakeNone) root->claimSystemWakeEvent(root, kWakeEventSource, gSource == ShengWakeLid ? "sheng lid" : "sheng power");
         break;
     case kIOMessageSystemHasPoweredOn: {
         const volatile struct armcpu_sleep_stats &st = armcpu_sleep_stats;
-        uint64_t ns = 0;
-        absolutetime_to_nanoseconds(st.asleep_ticks, &ns);
-        IOLog("sheng sleep: woke by %s (intid %u) after %llu ms; sleeps %u, spurious %u, cpu_off failures %u, phase %u\n",
-              sheng_sleep_woke_by(st.last_reason, gSource), st.last_intid, ns / 1000000, st.entries, st.spurious, st.cpu_off_failures, st.phase);
+        sheng_sleep_stats[7] = sheng_sleep_stats[7] + 1;
+        // asleep_ticks are counter ticks (CNTFRQ), not the Mach timebase.
+        IOLog("sheng sleep: woke by %s (intid %u) after %llu ms; sleeps %u, spurious %u, masked %u, ticks %u, unarmed %u, cpu_off failures "
+              "%u, phase %u\n", sheng_sleep_woke_by(st.last_reason, gSource), st.last_intid, counterMs(st.asleep_ticks), st.entries,
+              st.spurious, st.masked, st.ticks, st.unarmed, st.cpu_off_failures, st.phase);
         if (root && gSource != ShengWakeNone) root->requestUserActive(root, gSource == ShengWakeLid ? "sheng lid" : "sheng power");
         break;
     }

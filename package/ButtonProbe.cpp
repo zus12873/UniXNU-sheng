@@ -13,6 +13,10 @@
 #include <IOKit/IODeviceMemory.h>
 #include <kern/thread.h>
 #include <pexpert/pexpert.h>
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+#include <IOKit/IOService.h>
+#include <IOKit/pwr_mgt/RootDomain.h>
+#endif
 extern "C" {
 #include "BootResetCore.h"
 #include "ShengSleep.h"
@@ -42,6 +46,8 @@ volatile uint32_t gEvents;
 void (*volatile gSink)(void *, uint32_t);
 // Set by sheng_buttons_sleep_check when the power key woke the system: the thread then reports neither that press nor its release.
 int gSwallowPower;
+// Set with it: the thread asks the power manager for user activity once, which makes the wake a full one (the press itself is not reported).
+int gWakeUserActive;
 void *volatile gSinkContext;
 
 bool mapWindow(Window &w, uint64_t base, uint64_t size) {
@@ -184,6 +190,11 @@ void buttonsThread(void *, wait_result_t) {
     uint32_t seen = gEvents, last = 0;
     for (;;) {
         uint32_t mask = pressed();
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+        if (__atomic_exchange_n(&gWakeUserActive, 0, __ATOMIC_ACQ_REL)) {
+            if (IOPMrootDomain *root = IOService::getPMRootDomain()) root->requestUserActive(root, "sheng power key");
+        }
+#endif
         int swallow = __atomic_load_n(&gSwallowPower, __ATOMIC_ACQUIRE);
         if (swallow) {
             if (!sheng_sleep_swallow(&swallow, (mask & kReportPower) != 0)) mask &= ~kReportPower;
@@ -228,7 +239,10 @@ extern "C" int sheng_buttons_sleep_check(void) {
         }
     }
     __asm__ volatile("dsb sy" ::: "memory");
-    if (wake) __atomic_store_n(&gSwallowPower, 1, __ATOMIC_RELEASE);
+    if (wake) {
+        __atomic_store_n(&gSwallowPower, 1, __ATOMIC_RELEASE);
+        __atomic_store_n(&gWakeUserActive, 1, __ATOMIC_RELEASE);
+    }
     return wake;
 }
 

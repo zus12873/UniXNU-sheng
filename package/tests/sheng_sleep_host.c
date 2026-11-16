@@ -33,6 +33,18 @@ static void tlmm_keep_only_lid(void)
     }
 }
 
+// A pin routed to another processor (INTR_CFG target bits 7:5 not 3, the application processor) is that processor's: left as it is.
+static void tlmm_keep_leaves_other_targets(void)
+{
+    uint32_t cfg[SHENG_SLEEP_GPIO_COUNT], out[SHENG_SLEEP_GPIO_COUNT];
+    fill(cfg);
+    cfg[10] = (0u << 5) | (1u << 2) | 1u;               // target 0
+    cfg[11] = (4u << 5) | (3u << 2) | 1u;               // target 4
+    sheng_sleep_tlmm_keep(cfg, out);
+    CHECK(out[10] == cfg[10] && out[11] == cfg[11]);
+    CHECK((out[12] & SHENG_SLEEP_INTR_ENABLE) == 0);    // an application processor pin next to them is still turned off
+}
+
 static void tlmm_two_rounds(void)
 {
     uint32_t cfg[SHENG_SLEEP_GPIO_COUNT], copy[SHENG_SLEEP_GPIO_COUNT], a[SHENG_SLEEP_GPIO_COUNT], b[SHENG_SLEEP_GPIO_COUNT];
@@ -123,12 +135,14 @@ static void woke_by_names(void)
     CHECK(strcmp(sheng_sleep_woke_by(SHENG_SLEEP_ARMCPU_SOURCE, ShengWakePower), "power") == 0);
     CHECK(strcmp(sheng_sleep_woke_by(SHENG_SLEEP_ARMCPU_TIMER, ShengWakePower), "power") == 0);   // a source the board accepted wins
     CHECK(strcmp(sheng_sleep_woke_by(0, ShengWakeNone), "nothing") == 0);
+    CHECK(strcmp(sheng_sleep_woke_by(3u, ShengWakeNone), "storm") == 0);   // ArmcpuWakeStorm: a line kept firing
 }
 
 int main(void)
 {
     tlmm_keep_only_lid();
     tlmm_two_rounds();
+    tlmm_keep_leaves_other_targets();
     reserved_pins_not_usable();
     lid_open_wakes();
     lid_closed_sleeps();

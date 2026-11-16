@@ -139,6 +139,11 @@ extern volatile uint64_t native_ufs_block_reads __attribute__((weak_import)), na
     native_ufs_verify_ticks __attribute__((weak_import));
 extern volatile int native_staged_apps_stage __attribute__((weak_import));
 extern volatile int32_t native_buttons_stats[10] __attribute__((weak_import));
+// Platform sleep: ShengSleep.cpp's counters and ArmCpu's (drivers/ArmCpu/ArmCpuSleep.h layout).
+extern volatile int32_t sheng_sleep_stats[8] __attribute__((weak_import));
+struct armcpu_sleep_stats {uint32_t phase, entries, spurious, last_intid, last_reason, cpu_off_failures; uint64_t asleep_ticks;
+                           uint32_t masked, ticks, unarmed;};
+extern volatile struct armcpu_sleep_stats armcpu_sleep_stats __attribute__((weak_import));
 extern volatile int32_t native_keyboard_stats[17] __attribute__((weak_import));
 extern volatile int32_t native_keyboard_accel[4] __attribute__((weak_import));
 extern volatile int32_t native_keyboard_hid_stats[6] __attribute__((weak_import));
@@ -802,6 +807,23 @@ static size_t compose(char *out, size_t cap, uint32_t slot, unsigned now) {
     snprintf(row, sizeof row, "B st=%d irq=%d rep=%d mask=%x apid=%d/%d off=%d pdc=%x err=%d spur=%d", native_buttons_stats[0], native_buttons_stats[1],
              native_buttons_stats[2], native_buttons_stats[3], native_buttons_stats[4], native_buttons_stats[5], native_buttons_stats[6],
              native_buttons_stats[7], native_buttons_stats[8], native_buttons_stats[9]);
+    at = put(out, at, cap, row, sizeof row);
+  }
+  // Platform sleep (ShengSleep.cpp): the board's stage (2 registered), sleeps prepared, lid and power key wakes, lid reads closed while
+  // asleep, registration answer, will-sleep and has-powered-on notifications; then ArmCpu's: the phase reached (1 in the hook, 2 the other
+  // cores off, 3 waiting, 4 woken, 5 restored), sleeps, spurious wakes, storming lines masked, board ticks, sleeps with nothing armed,
+  // the waking INTID and reason (1 source, 2 timer, 3 storm), failed CPU_OFFs. The rows written before a sleep and after a wake show
+  // where a sleep that never came back stopped.
+  if (&sheng_sleep_stats && sheng_sleep_stats[0]) {
+    char row[220];
+    int n = snprintf(row, sizeof row, "SL st=%d n=%d lid=%d pwr=%d lidc=%d reg=%d will=%d on=%d", sheng_sleep_stats[0], sheng_sleep_stats[1],
+                     sheng_sleep_stats[2], sheng_sleep_stats[3], sheng_sleep_stats[4], sheng_sleep_stats[5], sheng_sleep_stats[6],
+                     sheng_sleep_stats[7]);
+    if (&armcpu_sleep_stats && n > 0 && (size_t)n < sizeof row) {
+      snprintf(row + n, sizeof row - (size_t)n, " ph=%u n=%u spur=%u mask=%u tick=%u unarm=%u id=%u why=%u off=%u", armcpu_sleep_stats.phase,
+               armcpu_sleep_stats.entries, armcpu_sleep_stats.spurious, armcpu_sleep_stats.masked, armcpu_sleep_stats.ticks,
+               armcpu_sleep_stats.unarmed, armcpu_sleep_stats.last_intid, armcpu_sleep_stats.last_reason, armcpu_sleep_stats.cpu_off_failures);
+    }
     at = put(out, at, cap, row, sizeof row);
   }
   // Keyboard cover (KeyboardProbe.cpp): stage (7 serving, negative the failed step) and its detail, engine protocol and clock, boot ROM
