@@ -28,6 +28,10 @@
 #include <pexpert/pexpert.h>
 #include "GeniI2c.h"
 #include "LidClamshell.h"
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+#include <IOKit/IOMessage.h>
+#include <IOKit/pwr_mgt/RootDomain.h>
+#endif
 
 // [0] stage (1 mapped, 2 engines ready, 3 published, 4 published as AppleARMBacklight, negative: the step that failed), [1] brightness requests, [2] last level written,
 // [3] level read back from engine a at start, [4] from engine b, [5] transfer errors, [6] last M_IRQ status of a failed transfer,
@@ -63,6 +67,8 @@ volatile uint64_t gRequest;
 volatile uint32_t gLidClosed;
 // The lid timer of the running service, armed by sheng_backlight_lid to apply the lid on the work loop.
 IOTimerEventSource *volatile gLidTimer;
+// 1 from the system's will-sleep notification to its has-powered-on one (macOS platform sleep): the panel is dark too.
+volatile uint32_t gSystemAsleep;
 
 bool mapWindow(Window &w, uint64_t base, uint64_t size) {
     IODeviceMemory *memory = IODeviceMemory::withRange(base, size);
@@ -238,8 +244,21 @@ class ShengBacklight : public IOService {
         self->service();
     }
 
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+    // The system sleeps (platform sleep) or has woken: the work loop writes the level shown again, dark or back to it, as for the lid.
+    // Returning at once with the notification's returnValue left 0 acknowledges it; the timer carries the change, so this never waits.
+    static IOReturn sleepWake(void *, void *, UInt32 message, IOService *, void *, vm_size_t) {
+        if (message != kIOMessageSystemWillSleep && message != kIOMessageSystemHasPoweredOn) return kIOReturnSuccess;
+        const bool asleep = message == kIOMessageSystemWillSleep;
+        __atomic_store_n(&gSystemAsleep, asleep ? 1u : 0u, __ATOMIC_RELEASE);
+        IOLog("sheng backlight: system %s, panel %s\n", asleep ? "going to sleep" : "awake", asleep ? "dark" : "back to its level");
+        if (IOTimerEventSource *timer = gLidTimer) timer->setTimeoutUS(1);
+        return kIOReturnSuccess;
+    }
+#endif
     void setLevel(uint32_t value) {
-        target = lid_backlight_level(value, __atomic_load_n(&gLidClosed, __ATOMIC_ACQUIRE) != 0);
+        target = lid_backlight_level(value, lid_backlight_dark(__atomic_load_n(&gLidClosed, __ATOMIC_ACQUIRE) != 0,
+                                                              __atomic_load_n(&gSystemAsleep, __ATOMIC_ACQUIRE) != 0));
         kick(0); kick(1);
         armTick();
     }
@@ -390,6 +409,9 @@ public:
         if (loop->addEventSource(fade) || loop->addEventSource(tick) || loop->addEventSource(attachTimer) || loop->addEventSource(inbox) ||
             loop->addEventSource(request) || loop->addEventSource(lid)) return false;
         gLidTimer = lid;
+#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
+        if (!registerSleepWakeInterest(&sleepWake, nullptr, nullptr)) IOLog("sheng backlight: no sleep/wake interest\n");
+#endif
         for (unsigned i = 0; i < 2; ++i) {
             const GeniIo io = {ioRead, ioWrite, (void *)gSe[i].va};
             uint32_t config = 0;

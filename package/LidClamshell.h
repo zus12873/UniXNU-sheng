@@ -34,4 +34,8 @@ static inline uint32_t lid_backlight_level(uint32_t level, bool closed)
     return closed ? 0 : level;
 }
 
+// Whether the panel is dark: the lid closed, or the system asleep (platform sleep: the panel has no power switch of its own, so its
+// backlight is what goes off while the system sleeps).
+static inline bool lid_backlight_dark(bool lid_closed, bool asleep) {return lid_closed || asleep;}
+
 #endif

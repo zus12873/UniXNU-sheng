@@ -49,6 +49,21 @@ static void closed_lid_darkens_the_backlight(void)
     CHECK(lid_backlight_level(2047, true) == 0);
 }
 
+static void backlight_dark_table(void)
+{
+    CHECK(!lid_backlight_dark(false, false));
+    CHECK(lid_backlight_dark(true, false));
+    CHECK(lid_backlight_dark(false, true));
+    CHECK(lid_backlight_dark(true, true));
+}
+
+// The system going to sleep darkens the panel with the lid open too (the menu's Sleep), and waking brings the level back.
+static void asleep_darkens_even_with_lid_open(void)
+{
+    CHECK(lid_backlight_level(1500, lid_backlight_dark(false, true)) == 0);
+    CHECK(lid_backlight_level(1500, lid_backlight_dark(false, false)) == 1500);
+}
+
 int main(void)
 {
     open_at_start_is_not_told();
@@ -56,6 +71,8 @@ int main(void)
     closed_at_start_is_told();
     quick_bounces_alternate();
     closed_lid_darkens_the_backlight();
+    backlight_dark_table();
+    asleep_darkens_even_with_lid_open();
     printf("checks %u\n", checks);
     return 0;
 }
