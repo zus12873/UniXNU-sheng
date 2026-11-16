@@ -34,6 +34,7 @@ extern "C" {
 #include "Wn8030.h"
 #include "QcomRpmh.h"
 #include "TouchBoard.h"
+#include "KeyboardTrace.h"
 #if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
 #include <IOKit/pwr_mgt/RootDomain.h>
 #include "LidClamshell.h"
@@ -127,6 +128,8 @@ struct Keyboard {
     bool classRegistered;
     uint8_t frame[WN8030_FRAME_BYTES];
     uint8_t command[1 + WN8030_DATA_COMMAND_BYTES];
+    kb_trace trace;               // the last frames, for the attach and detach log lines (KeyboardTrace.h)
+    uint32_t reloads;             // controller reloads started by the service
 };
 Keyboard *gKb;
 volatile uint32_t gWake;      // the thread's event
@@ -513,12 +516,49 @@ void readHall() {
     kb->service.statePending = true;
 }
 
+kb_trace_kind traceKind(int kind) {
+    switch (kind) {
+    case Wn8030Keyboard: return KbTraceKeyboard;
+    case Wn8030Consumer: return KbTraceConsumer;
+    case Wn8030Touchpad: return KbTraceTouchpad;
+    case Wn8030Attach: return KbTraceAttach;
+    case Wn8030Accel: return KbTraceAccel;
+    case Wn8030AuthRequest: case Wn8030AuthInit: case Wn8030AuthChallenge: return KbTraceAuth;
+    case Wn8030Invalid: return KbTraceInvalid;
+    default: return KbTraceOther;
+    }
+}
+
+// One line per attach frame that changes the state or reports a change in progress: what the controller sent, the frames before it
+// and how long ago they came, and the controller's I2C health. Input and accelerometer frames up to the detach with no I2C failures:
+// the controller kept working and lost the cover. A quiet controller or I2C failures: the controller side.
+void logAttach(const char *what, uint32_t now) {
+    Keyboard *kb = gKb;
+    kb_trace_summary s;
+    kb_trace_summarize(&kb->trace, now, &s);
+    const uint8_t *b = kb->frame;
+    const int32_t *k = const_cast<const int32_t *>(native_keyboard_stats);
+    IOLog("sheng keyboard: cover %s; frame %02x%02x%02x%02x %02x%02x%02x%02x %02x%02x%02x%02x; before it %s, ms since a frame %d, "
+          "input %d, accelerometer %d; frames %d, controller interrupts %d, i2c failures %d, last i2c error 0x%x, auth %d, attaches %d, "
+          "reloads %u\n", what, b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15], b[16], s.kinds,
+          (int32_t)s.since_any, (int32_t)s.since_input, (int32_t)s.since_accel, k[6], k[5], k[11], k[13], k[15] & 0xffff,
+          (k[8] >> 8) & 0xffff, kb->reloads);
+}
+
 bool handleFrame() {
     Keyboard *kb = gKb;
     if (!readFrame()) return false;
     bump(6);
     Wn8030Frame f;
-    switch (wn8030_parse(kb->frame, &f)) {
+    const int kind = wn8030_parse(kb->frame, &f);
+    const uint32_t now = static_cast<uint32_t>(nowMs());
+    if (kind == Wn8030Attach) {
+        if (f.attached == 1 && !kb->attached) logAttach("attached", now);
+        else if (f.attached == 0 && kb->attached) logAttach("detached", now);
+        else if (f.attached < 0) logAttach("changing", now);
+    }
+    kb_trace_push(&kb->trace, now, traceKind(kind));
+    switch (kind) {
     case Wn8030Keyboard: case Wn8030Consumer: case Wn8030Touchpad:
         if (kb->hid && kb->inputEnabled) {
             uint8_t touchpad[WN8030_TOUCHPAD_REPORT];
@@ -591,10 +631,23 @@ struct KeyboardIO {
     bool apply() const {return applyInputState();}
     void release() const {releaseInputs();}
     void wake() const {
+        IOLog("sheng keyboard: keep-awake command failed, waking the controller (i2c failures %d, last i2c error 0x%x)\n",
+              native_keyboard_stats[11], native_keyboard_stats[13]);
         setOutput(PinSleep, false); IOSleep(10);
         setOutput(PinSleep, true); IOSleep(25);
     }
-    bool recover() const {return recoverController();}
+    // A reload is the service's answer to three failed reads or commands in a row: the controller side stopped answering.
+    bool recover() const {
+        Keyboard *kb = gKb;
+        ++kb->reloads;
+        IOLog("sheng keyboard: controller reload %u (read failures %u, command failures %u, i2c failures %d, last i2c error 0x%x, "
+              "frames %d)\n", kb->reloads, kb->service.readFailures, kb->service.controlFailures, native_keyboard_stats[11],
+              native_keyboard_stats[13], native_keyboard_stats[6]);
+        const bool ok = recoverController();
+        IOLog("sheng keyboard: controller reload %u %s (stage %d, detail %d)\n", kb->reloads, ok ? "done" : "failed",
+              native_keyboard_stats[0], native_keyboard_stats[1]);
+        return ok;
+    }
 };
 
 void serve() {
