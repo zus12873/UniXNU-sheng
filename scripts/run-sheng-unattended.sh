@@ -65,6 +65,13 @@ def wait_fastboot(seconds):
     raise SystemExit(f'{serial}: fastboot did not appear within {seconds}s; evidence retained in {output}')
 
 def boot(path):
+    result = subprocess.run(['fastboot', '-s', serial, 'getvar', 'current-slot'],
+                            capture_output=True, text=True, check=True, timeout=10)
+    selected = re.search(r'^current-slot:\s*([ab])\s*$', result.stdout + result.stderr, re.M)
+    if selected is None:
+        raise SystemExit(f'{serial}: fastboot did not report an A/B slot')
+    # Give each RAM boot a fresh retry budget on the selected slot.
+    subprocess.run(['fastboot', '-s', serial, 'set_active', selected[1]], check=True, timeout=15)
     try:
         subprocess.run(['fastboot', '-s', serial, 'boot', str(path)], check=True, timeout=120)
     except subprocess.TimeoutExpired:
@@ -80,6 +87,7 @@ while tag in previous_tags:
     tag = 's' + secrets.token_hex(3)[:5]
 tagged_directory = tempfile.TemporaryDirectory(prefix='sheng-timed-boot-')
 tagged = Path(tagged_directory.name) / image.name
+(output / 'boot-attempt.json').write_text(json.dumps(dict(image=image.name, reader=reader.name, expected_tag=tag), indent=2) + '\n')
 subprocess.run([sys.executable, str(root / 'scripts/repack-sheng-boot.py'), str(image), str(tagged),
                 '--kernel-arg', 'build-tag=' + tag], check=True)
 wait_fastboot(30)

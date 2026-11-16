@@ -24,8 +24,8 @@ static size_t k_strlcat(char *d,const char *s,size_t n){size_t dl=strnlen(d,n),s
 #define unlink k_unlink
 #define printf(...) ((void)0)
 #define stat64 stat
-// The policy wraps its calls in POLICY_CALL (rponeawa a5bff31), which with policy_step sits above the extracted body: the boot
-// log stand-in records nothing and passes the call's result through.
+// The policy wraps its calls in POLICY_CALL, which with policy_step sits above the extracted body: the boot log stand-in
+// records nothing and passes the call's result through.
 static int policy_step(const char *stage,int result){(void)stage;return result;}
 #define POLICY_CALL(stage, expression) (policy_step(stage " enter", 0), policy_step(stage " returned", (expression)))
 typedef void *proc_t;

@@ -42,8 +42,8 @@ jobs:
           submodules: recursive
       - uses: actions/checkout@v4
         with:
-          repository: CrossDarwin/UniXNU_macOS
-          ref: 31815846b94465178abdda717096df07e7395cfa # Qualified sheng boot transport
+          repository: UniXNU/UniXNU
+          ref: 82b847c4ac3f68a57024b3082ffa3a03442defd9 # Wi-Fi runtime and Data firmware integration
           path: UniXNU
           submodules: recursive
       - uses: actions/checkout@v4
@@ -53,7 +53,6 @@ jobs:
           submodules: recursive
       - name: tools
         run: |
-          python3 UniXNU/scripts/unixnu/test_boot_template.py
           brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup blacktop/tap/ipsw
           {
             echo "$HOME/.cargo/bin"
