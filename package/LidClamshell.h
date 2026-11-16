@@ -25,4 +25,13 @@ static inline enum lid_clamshell_message lid_clamshell_step(struct lid_clamshell
     return closed ? LidClamshellClosed : LidClamshellOpened;
 }
 
+// The backlight level written to the panel (AppleARMBacklight.cpp sheng_backlight_lid): none while the lid is closed. Told the clamshell
+// closed, macOS's WindowServer passes it to the framebuffer (logged "clamshell state:2 sent to IOMFB") and leaves the panel to the
+// system sleep that follows on a Mac; this board refuses that sleep, so the backlight driver darkens the panel itself. The level the
+// system asked for is kept and published, and comes back when the lid opens.
+static inline uint32_t lid_backlight_level(uint32_t level, bool closed)
+{
+    return closed ? 0 : level;
+}
+
 #endif

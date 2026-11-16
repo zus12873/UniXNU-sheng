@@ -41,12 +41,21 @@ static void quick_bounces_alternate(void)
     }
 }
 
+static void closed_lid_darkens_the_backlight(void)
+{
+    CHECK(lid_backlight_level(1500, false) == 1500);
+    CHECK(lid_backlight_level(1500, true) == 0);
+    CHECK(lid_backlight_level(0, false) == 0);
+    CHECK(lid_backlight_level(2047, true) == 0);
+}
+
 int main(void)
 {
     open_at_start_is_not_told();
     each_change_is_told_once();
     closed_at_start_is_told();
     quick_bounces_alternate();
+    closed_lid_darkens_the_backlight();
     printf("checks %u\n", checks);
     return 0;
 }

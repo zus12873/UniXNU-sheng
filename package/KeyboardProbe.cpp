@@ -484,6 +484,9 @@ void detachCover() {
 #if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
 lid_clamshell gClamshell = LID_CLAMSHELL_INIT;   // the keyboard thread's only
 #endif
+}  // namespace
+extern "C" void sheng_backlight_lid(bool closed) __attribute__((weak_import));   // AppleARMBacklight.cpp
+namespace {
 
 void publishLid(bool closed, bool changed) {
     __atomic_store_n(&native_keyboard_lid_closed, closed ? 1u : 0u, __ATOMIC_RELEASE);
@@ -497,6 +500,8 @@ void publishLid(bool closed, bool changed) {
     if (message == LidClamshellNone) return;
     root->receivePowerNotification(message == LidClamshellClosed ? kIOPMClamshellClosed : kIOPMClamshellOpened);
     IOLog("sheng keyboard: clamshell %s sent to the power manager\n", message == LidClamshellClosed ? "closed" : "open");
+    // macOS leaves the built-in panel to the clamshell sleep this board refuses: the backlight driver darkens it (LidClamshell.h).
+    if (sheng_backlight_lid) sheng_backlight_lid(message == LidClamshellClosed);
 #endif
 }
 
