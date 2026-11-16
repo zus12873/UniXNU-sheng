@@ -96,6 +96,8 @@ void *volatile gOutputContext;
 
 // [0] devices started, [1] input reports, [2] failed input reports, [3] output reports, [4] feature reads, [5] last failure
 extern "C" {volatile int32_t native_keyboard_hid_stats[6];}
+// The controller's counters (KeyboardProbe.cpp: stage, interrupts, frames read, I2C failures and the rest).
+extern "C" volatile int32_t native_keyboard_stats[17];
 
 class ShengKeyboardCover : public IOHIDDevice {
     OSDeclareDefaultStructors(ShengKeyboardCover)
@@ -106,6 +108,21 @@ class ShengKeyboardCover : public IOHIDDevice {
     bool gateAdded = false, stopping = false, reporting = false;
 #if NATIVE_COVER_POINTER
     struct wn8030_pointer pointer = {};
+    uint32_t timingAt = 0;
+    bool timingSent = false;
+
+    // ShengTouchpadTiming, for `ioreg -r -c ShengKeyboardCover`: 32-bit little-endian words, layout 1, the touchpad reports, the
+    // pointer reports sent, the touches the pause rule restarted, the gap buckets (Wn8030.h wn8030_gap_bucket), then the controller's
+    // 17 counters. Sent with the first touchpad report and then at most once a second of report time.
+    void publishTiming(uint32_t now) {
+        if (timingSent && now - timingAt < 1000) return;
+        timingSent = true; timingAt = now;
+        uint32_t words[4 + WN8030_GAP_BUCKETS + 17];
+        words[0] = 1; words[1] = pointer.reports; words[2] = pointer.sent; words[3] = pointer.restarts;
+        for (unsigned i = 0; i < WN8030_GAP_BUCKETS; ++i) words[4 + i] = pointer.gaps[i];
+        for (unsigned i = 0; i < 17; ++i) words[4 + WN8030_GAP_BUCKETS + i] = static_cast<uint32_t>(native_keyboard_stats[i]);
+        setProperty("ShengTouchpadTiming", words, sizeof words);
+    }
 #endif
 
     static IOReturn submitAction(OSObject *owner, void *bytes, void *length, void *, void *) {
@@ -137,7 +154,9 @@ public:
         if (bytes[0] == kTouchpadId) {
             if (length != WN8030_TOUCHPAD_REPORT) return;
             uint64_t ns; absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
-            length = wn8030_pointer_report_at(&pointer, bytes, static_cast<uint32_t>(ns / 1000000), moved);
+            const uint32_t now = static_cast<uint32_t>(ns / 1000000);
+            length = wn8030_pointer_report_at(&pointer, bytes, now, moved);
+            publishTiming(now);
             if (!length) return;
             bytes = moved;
         }

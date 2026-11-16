@@ -137,6 +137,8 @@ extern struct wn8030_census native_keyboard_census;
  * or 0 when nothing changed. */
 #define WN8030_POINTER_ID 0x1au
 #define WN8030_POINTER_REPORT 8u
+/* The bucket of a gap between two touchpad reports (wn8030_gap_bucket): under 10, 20, 30, 45, 60, 100, 250 ms, then the rest. */
+#define WN8030_GAP_BUCKETS 8u
 struct wn8030_pointer {
     uint8_t fingers, buttons;
     uint8_t click;                            /* the button the click held now began as (0: none held) */
@@ -145,7 +147,12 @@ struct wn8030_pointer {
     int32_t move_x, move_y;  /* motion not yet sent, in controller counts */
     int32_t scroll_x, scroll_y;
     uint32_t at_ms;          /* when the report before arrived (wn8030_pointer_report_at) */
+    /* The timing record (wn8030_pointer_report_at): touchpad reports, pointer reports sent, touches the pause rule restarted, and
+     * the gaps before reports that follow one with a finger down, by wn8030_gap_bucket. */
+    uint32_t reports, sent, restarts;
+    uint32_t gaps[WN8030_GAP_BUCKETS];
 };
+unsigned wn8030_gap_bucket(uint32_t ms);
 unsigned wn8030_pointer_report(struct wn8030_pointer *state, const uint8_t touchpad[WN8030_TOUCHPAD_REPORT],
                                uint8_t out[WN8030_POINTER_REPORT]);
 /* The same with the report's arrival time in milliseconds (any origin; the count may wrap). A report more than

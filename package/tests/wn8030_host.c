@@ -318,6 +318,30 @@ int main(int argc, char **argv)
         FINGER(0, 1, 3, 1500, 1000);
         CHECK(wn8030_pointer_report_at(&st, r, 400, o) == 0 && st.buttons == 1);
         r[1] = 0;
+
+        /* The timing record: every report, the gap before each report that follows one with a finger down (by bucket), the touches
+         * the pause rule restarted, and the pointer reports sent. */
+        CHECK(wn8030_gap_bucket(0) == 0 && wn8030_gap_bucket(9) == 0 && wn8030_gap_bucket(10) == 1 && wn8030_gap_bucket(19) == 1);
+        CHECK(wn8030_gap_bucket(20) == 2 && wn8030_gap_bucket(29) == 2 && wn8030_gap_bucket(30) == 3 && wn8030_gap_bucket(44) == 3);
+        CHECK(wn8030_gap_bucket(45) == 4 && wn8030_gap_bucket(59) == 4 && wn8030_gap_bucket(60) == 5 && wn8030_gap_bucket(99) == 5);
+        CHECK(wn8030_gap_bucket(100) == 6 && wn8030_gap_bucket(249) == 6 && wn8030_gap_bucket(250) == 7);
+        CHECK(wn8030_gap_bucket(0xffffffffu) == WN8030_GAP_BUCKETS - 1);
+        memset(&st, 0, sizeof st); memset(r, 0, sizeof r); r[0] = WN8030_TOUCHPAD_ID;
+        FINGER(0, 1, 3, 1000, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 1000, o) == 0);              /* no finger before: no gap */
+        FINGER(0, 1, 3, 1010, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 1013, o) == WN8030_POINTER_REPORT);   /* 13 ms: bucket 1 */
+        FINGER(0, 1, 3, 1020, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 1063, o) == WN8030_POINTER_REPORT);   /* 50 ms: bucket 4 */
+        FINGER(0, 1, 3, 1900, 1000);
+        CHECK(wn8030_pointer_report_at(&st, r, 1163, o) == 0);              /* 100 ms: bucket 6, a restart */
+        FINGER(0, 0, 0, 0, 0);
+        CHECK(wn8030_pointer_report_at(&st, r, 1170, o) == 0);              /* the lift, 7 ms: bucket 0 */
+        FINGER(0, 1, 4, 500, 500);
+        CHECK(wn8030_pointer_report_at(&st, r, 3000, o) == 0);              /* no finger before: no gap, no restart */
+        CHECK(st.reports == 6 && st.sent == 2 && st.restarts == 1);
+        CHECK(st.gaps[0] == 1 && st.gaps[1] == 1 && st.gaps[4] == 1 && st.gaps[6] == 1);
+        CHECK(st.gaps[2] == 0 && st.gaps[3] == 0 && st.gaps[5] == 0 && st.gaps[7] == 0);
 #undef FINGER
 #undef S16
     }
