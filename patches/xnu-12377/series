@@ -18,7 +18,9 @@ zzzzzzzzzz-sheng-sigp-reinit-assert.patch
 sheng-appsync-runtime.patch
 sheng-appsync-user-trust.patch
 zzzzzzzzzzz-sheng-edge-matrix.patch
-sheng-text-fixup-verified-pagein.patch
+# sheng-text-fixup-verified-pagein.patch (12 GiB unit, 11-14) is replaced by the core profile's
+# cshash-compressed-text-revalidation.patch (upstream UniXNU #268): both verify compressed text blocks against
+# their signed bytes in decmpfs.c and cannot apply together. Chosen by the user on 2026-11-16.
 zzzzzz-sheng-bsd-checkpoints.patch
 sheng-bootstrap-checkpoints.patch
 sheng-headless-startup-checkpoints.patch

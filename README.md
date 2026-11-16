@@ -83,11 +83,6 @@ and confirm **Initialize Data and boot**. This erases macOS Data and initializes
 its persistent store from the installation seed. The seed determines the account
 and Setup Assistant settings. Select **Boot** on subsequent starts to retain Data.
 
-The macOS profile keeps the qualified firmware transport and inserts DarwinBoot
-from the current firmware build. Its SHA-256-pinned template is cached by UniXNU;
-`boot/boot.json` records the selected inputs. The menu waits for input. The
-187 MiB payload must fit within the 193 MiB boot-image limit.
-
 ## Build on GitHub
 
 `.github/workflows/package.yml` runs the same script on a macOS runner and
