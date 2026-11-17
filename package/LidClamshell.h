@@ -36,7 +36,22 @@ static inline uint32_t lid_backlight_level(uint32_t level, bool closed)
 }
 
 // Whether the panel is dark: the lid closed, or the system asleep (platform sleep: the panel has no power switch of its own, so its
-// backlight is what goes off while the system sleeps).
+// backlight is what goes off while the system sleeps, and stays off after the wake until lid_backlight_wake_ready).
 static inline bool lid_backlight_dark(bool lid_closed, bool asleep) {return lid_closed || asleep;}
+
+// Woken from platform sleep, the panel stays dark until the compositor presents again. The system's has-powered-on notification comes
+// before WindowServer turns the display on (about 25 ms) and before its first frames (about 0.25 s): lit then, the panel showed the
+// framebuffer as the display pipeline found it, black and then colour bars for under a second. The frames are those the display shows
+// (NativeLegacyDisplay native_legacy_swapstat: copies, flips and latches); LID_BACKLIGHT_WAKE_FRAMES new ones light it, and so does
+// LID_BACKLIGHT_WAKE_TIMEOUT_MS without any, so that a screen with nothing to redraw is never left dark. Without those counts
+// (counted false), a fixed LID_BACKLIGHT_WAKE_BLIND_MS.
+#define LID_BACKLIGHT_WAKE_FRAMES 2u
+#define LID_BACKLIGHT_WAKE_TIMEOUT_MS 1500u
+#define LID_BACKLIGHT_WAKE_BLIND_MS 600u
+static inline bool lid_backlight_wake_ready(bool counted, uint32_t frames_at_wake, uint32_t frames_now, uint64_t ms_since_wake)
+{
+    if (!counted) return ms_since_wake >= LID_BACKLIGHT_WAKE_BLIND_MS;
+    return (uint32_t)(frames_now - frames_at_wake) >= LID_BACKLIGHT_WAKE_FRAMES || ms_since_wake >= LID_BACKLIGHT_WAKE_TIMEOUT_MS;
+}
 
 #endif

@@ -64,6 +64,38 @@ static void asleep_darkens_even_with_lid_open(void)
     CHECK(lid_backlight_level(1500, lid_backlight_dark(false, false)) == 1500);
 }
 
+// Woken, the panel stays dark until the compositor has presented frames again: lit at the wake it showed the framebuffer as the
+// display pipeline found it (black, then colour bars for under a second) before the desktop.
+static void woken_panel_waits_for_frames(void)
+{
+    CHECK(!lid_backlight_wake_ready(true, 100, 100, 0));
+    CHECK(!lid_backlight_wake_ready(true, 100, 101, 50));
+    CHECK(lid_backlight_wake_ready(true, 100, 102, 60));
+    CHECK(lid_backlight_wake_ready(true, 100, 140, 300));
+}
+
+// No frames at all (nothing on the screen changes): lit after the timeout, never left dark.
+static void woken_panel_times_out(void)
+{
+    CHECK(!lid_backlight_wake_ready(true, 7, 7, LID_BACKLIGHT_WAKE_TIMEOUT_MS - 1));
+    CHECK(lid_backlight_wake_ready(true, 7, 7, LID_BACKLIGHT_WAKE_TIMEOUT_MS));
+    CHECK(lid_backlight_wake_ready(true, 7, 8, 60000));
+}
+
+// The display's counters wrap.
+static void frame_count_wraps(void)
+{
+    CHECK(lid_backlight_wake_ready(true, 0xffffffffu, 1u, 10));
+    CHECK(!lid_backlight_wake_ready(true, 0xffffffffu, 0u, 10));
+}
+
+// Without the display's frame counts (another framebuffer): a fixed wait.
+static void without_frame_counts(void)
+{
+    CHECK(!lid_backlight_wake_ready(false, 0, 50, LID_BACKLIGHT_WAKE_BLIND_MS - 1));
+    CHECK(lid_backlight_wake_ready(false, 0, 0, LID_BACKLIGHT_WAKE_BLIND_MS));
+}
+
 int main(void)
 {
     open_at_start_is_not_told();
@@ -73,6 +105,10 @@ int main(void)
     closed_lid_darkens_the_backlight();
     backlight_dark_table();
     asleep_darkens_even_with_lid_open();
+    woken_panel_waits_for_frames();
+    woken_panel_times_out();
+    frame_count_wraps();
+    without_frame_counts();
     printf("checks %u\n", checks);
     return 0;
 }
