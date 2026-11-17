@@ -666,6 +666,13 @@ revision = "e4b7c7af39124d0e957fa73833ed6c98b361ed8b"
 command = "python3 scripts/run-local-kernel.py --sdk SDK --tools TOOLCHAIN -- build kernel prelink -D ../UniXNU-sheng --os macos-27 --data-ramdisk installed-data.dbr --skip-preflight"
 result = "The macOS 27.3 archive build resolves Ath12kWifi 39cc47b7bd1afef3c03a977c0c06fe475199ac0c with SM8550 2dc650ca and compiles the selected network sources with the exported Xcode 26.6 kernel toolchain."
 
+[[area.evidence]]
+kind = "host"
+reference = "scripts/check-wifi-scan-host.py"
+command = "python3 scripts/check-wifi-scan-host.py && cd drivers/Ath12kWifi && python3 tools/test-mainline-runtime.py && python3 tools/test-supplicant.py"
+revision = "7d088df290d95502a390c64f140b7e6b59f47069"
+result = "Request 86's two channels and request 10's nine become their frequencies, repeats once, 6 GHz left out, an empty, truncated, 65-entry or 33-frequency list every band (45 checks). In Ath12kWifi the frequencies reach the supplicant with and without a name and the supplicant's driver scan carries them unchanged; the earlier supplicant modes pass."
+
 [[area]]
 id = "audio"
 status = "implemented"
@@ -782,6 +789,13 @@ reference = "https://github.com/rponeawa/UniXNU-sheng/blob/ef84485040ae364c91cae
 command = "scripts/run-sheng-unattended.sh sheng-macos27-inherited-prime.img 7500"
 revision = "c30fec292042b44537bf764468e6a15d658f21b6"
 result = "The macOS 27.3 PC-USB capture reported battery 97 percent, 4865 mV and 1109 mA at the input, with gauge authentication bits 3."
+
+[[area.evidence]]
+kind = "host"
+reference = "scripts/check-sheng-sleep-host.py"
+command = "python3 scripts/check-sheng-sleep-host.py"
+revision = "7d088df290d95502a390c64f140b7e6b59f47069"
+result = "The wait's preparation clears the lid pin's status with the lid open as well as closed; 467 checks pass."
 
 [[area]]
 id = "packaging"
