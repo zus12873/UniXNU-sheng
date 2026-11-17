@@ -640,6 +640,13 @@ result = "The launchd cache fixture checks that the Wi-Fi job and other stock jo
 
 [[area.evidence]]
 kind = "host"
+reference = "scripts/check-wifi-scan-host.py"
+command = "python3 scripts/check-wifi-scan-host.py && python3 scripts/check-wifi-log-export-host.py"
+revision = "fcee9fa2ac6b2c1c8f72802815c12cc318d71523"
+result = "The capability bitmap has bits 22 and 46 with the earlier eight; a request 86 built as __getScanData builds it (two names and the wildcard) scans every network, one name without the wildcard scans that name, and short, overlong and over-counted requests are refused. The Wi-Fi log export returns the ring oldest first, whole lines only, and cuts a line without its terminator."
+
+[[area.evidence]]
+kind = "host"
 reference = "https://github.com/rponeawa/UniXNU-sheng/blob/d4f97b86b7bcf239f03ab9fe34bfb1f295901400/reports/sheng-macos27-source-lab.json"
 revision = "d4f97b86b7bcf239f03ab9fe34bfb1f295901400"
 command = "prepare-sheng-gpu-lab.py --preserve-data"
