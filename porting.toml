@@ -282,6 +282,13 @@ revision = "d4f97b86b7bcf239f03ab9fe34bfb1f295901400"
 command = "prepare-sheng-gpu-lab.py --preserve-data"
 result = "The source kernel links the macOS display adapter; the six-minute Core Animation scene builds with a preferred 120 Hz frame rate."
 
+[[area.evidence]]
+kind = "host"
+reference = "scripts/check-lid-clamshell-host.py"
+command = "python3 scripts/check-lid-clamshell-host.py"
+revision = "1466e220794a2f95ddb831dc71f25c41fb68838f"
+result = "After a wake the backlight waits for two new frames, lights after 1.5 s without any and after a fixed 0.6 s without the display's counts; the frame counter's wrap is handled. 51 checks pass."
+
 [[area]]
 id = "input"
 status = "implemented"
