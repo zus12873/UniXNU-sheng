@@ -26,7 +26,7 @@ state=/private/var/db/unixnu-lab
 icon_cache=$(/usr/bin/sudo -u unixnu /usr/bin/getconf DARWIN_USER_CACHE_DIR)
 icon_command_log=${icon_cache%/}/com.apple.iconservicesagent/com.apple.metal/m2v/command-buffer.log
 if [ -s /private/var/ngpu/test/share/icon-probe-path ]; then
-    /bin/rm -f "$icon_command_log"
+    /bin/rm -f "$icon_command_log" "${icon_command_log%/*}/runtime-stderr.log"
 fi
 /bin/mkdir -p "$state"
 /bin/chmod 700 "$state"
@@ -77,7 +77,9 @@ video_probe() {
         /bin/echo "video probe exit=$result" >> "$session/video-probe.log"
     done
 }
-video_probe &
+if [ ! -s /private/var/ngpu/test/share/icon-probe-path ]; then
+    video_probe &
+fi
 if [ -s /private/var/ngpu/test/share/graphics-comparison ]; then
     (
         delays='120 90'
@@ -99,12 +101,24 @@ graphics_state() {
     {
         /bin/date -u
         /bin/echo "boot=$boot"
+        runtime_stderr=/private/var/tmp/NativeAdrenoMetal.cache/runtime-stderr.log
+        if [ -s "$runtime_stderr" ]; then
+            /usr/bin/awk -v boot="$boot" '
+                /^native-metal runtime stderr boot=/ { current = index($0, "boot=" boot " ") != 0 }
+                current { print }
+            ' "$runtime_stderr" | /usr/bin/tail -c 65536
+        fi
+        if [ -s /private/var/ngpu/test/share/icon-probe-path ] && [ -s "${icon_command_log%/*}/runtime-stderr.log" ]; then
+            /usr/bin/grep -Ev '^native-metal dump (function|cb|pipeline|image) ' "${icon_command_log%/*}/runtime-stderr.log" | /usr/bin/tail -c 131072
+        fi
         /bin/ps -axo pid,ppid,etime,pcpu,rss,comm | /usr/bin/awk 'NR == 1 || /WindowServer|loginwindow|Wallpaper|iconservices|icon-probe|video-probe|VTDecoder|KeyboardSetupAssistant|ShaderCache/'
         if [ -x '/Library/GPUBundles/Shader Cache.app/Contents/MacOS/ShaderCache' ]; then
             '/Library/GPUBundles/Shader Cache.app/Contents/MacOS/ShaderCache' --status
         fi
         /usr/sbin/ioreg -r -c AppleVideoToolboxParavirtualizationDriver -l
         /usr/sbin/ioreg -r -c NativeUfsBlock -l -d 1
+        /usr/sbin/ioreg -r -c ShengKeyboardCover -l -d 1 | /usr/bin/awk '/<class ShengKeyboardCover|"ShengTouchpadTiming"|"Product"|"VendorID"|"ProductID"/'
+        /bin/launchctl print-disabled system | /usr/bin/grep -F com.openssh.sshd
         /sbin/mount | /usr/bin/awk '/Cryptexes\/App|AppCryptex/'
         /bin/ls -ld /Applications/Safari.app /System/Applications/Safari.app /System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app
         /bin/launchctl print gui/501/org.unixnu.test.agent

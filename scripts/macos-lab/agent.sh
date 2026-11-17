@@ -40,14 +40,21 @@ if [ -s /private/var/ngpu/test/share/graphics-comparison ]; then
     /private/var/ngpu/test/bin/gpu-scene &
     animation=$!
     /bin/echo "comparison start boot=$(/usr/sbin/sysctl -n kern.bootsessionuuid)"
-    for round in 1 2; do
+    rounds=2
+    pane_seconds=20
+    settle_seconds=30
+    if [ -r /private/var/ngpu/test/share/graphics-timing ]; then
+        read -r rounds pane_seconds settle_seconds < /private/var/ngpu/test/share/graphics-timing
+    fi
+    /bin/echo "comparison timing rounds=$rounds pane_seconds=$pane_seconds settle_seconds=$settle_seconds"
+    for round in $(/usr/bin/seq 1 "$rounds"); do
         for pane in com.apple.systempreferences.GeneralSettings com.apple.Network-Settings.extension com.apple.Displays-Settings.extension com.apple.systempreferences.GeneralSettings; do
             /bin/echo "comparison round=$round pane=$pane time=$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
             /usr/bin/open "x-apple.systempreferences:$pane"
-            /bin/sleep 20
+            /bin/sleep "$pane_seconds"
         done
     done
-    /bin/sleep 30
+    /bin/sleep "$settle_seconds"
     /bin/kill -TERM "$animation" 2>/dev/null || :
     /bin/echo "comparison complete time=$(/bin/date -u '+%Y-%m-%dT%H:%M:%SZ')"
     /usr/bin/touch /Users/Shared/unixnu-test/benchmark.done
@@ -58,43 +65,49 @@ fi
     tool=/private/var/ngpu/test/bin/icon-probe
     log=/Users/Shared/unixnu-test/icon-probe.log
     /bin/echo "icon probe boot=$(/usr/sbin/sysctl -n kern.bootsessionuuid)" > "$log"
-    /private/var/ngpu/test/bin/gpu-correctness-probe --all >> "$log" 2>&1 &
-    probe=$!
-    ( /bin/sleep 90; /bin/kill -KILL "$probe" 2>/dev/null ) &
-    alarm=$!
-    wait "$probe"
-    /bin/echo "correctness exit=$?" >> "$log"
-    /bin/kill "$alarm" 2>/dev/null || :
-    replay=/private/var/ngpu/test/bin/renderbox-alpha-probe
-    if [ -x "$replay" ]; then
-        inputs=/private/var/ngpu/test/share/renderbox-alpha
-        "$replay" "$inputs/vertex.air" "$inputs/fragment.air" "$inputs/globals.bin" "$inputs/gradient.bin" >> "$log" 2>&1 &
-        probe=$!
-        ( /bin/sleep 30; /bin/kill -KILL "$probe" 2>/dev/null ) &
-        alarm=$!
-        wait "$probe"
-        /bin/echo "RenderBox alpha replay exit=$?" >> "$log"
-        /bin/kill "$alarm" 2>/dev/null || :
-    fi
-    for mps in 1 0; do
-        CI_ENABLE_MPS="$mps" "$tool" >> "$log" 2>&1 &
+    if [ ! -s /private/var/ngpu/test/share/icon-probe-path ]; then
+        /private/var/ngpu/test/bin/gpu-correctness-probe --all >> "$log" 2>&1 &
         probe=$!
         ( /bin/sleep 90; /bin/kill -KILL "$probe" 2>/dev/null ) &
         alarm=$!
         wait "$probe"
-        /bin/echo "blur mps=$mps exit=$?" >> "$log"
+        /bin/echo "correctness exit=$?" >> "$log"
         /bin/kill "$alarm" 2>/dev/null || :
-    done
+        replay=/private/var/ngpu/test/bin/renderbox-alpha-probe
+        if [ -x "$replay" ]; then
+            inputs=/private/var/ngpu/test/share/renderbox-alpha
+            "$replay" "$inputs/vertex.air" "$inputs/fragment.air" "$inputs/globals.bin" "$inputs/gradient.bin" >> "$log" 2>&1 &
+            probe=$!
+            ( /bin/sleep 30; /bin/kill -KILL "$probe" 2>/dev/null ) &
+            alarm=$!
+            wait "$probe"
+            /bin/echo "RenderBox alpha replay exit=$?" >> "$log"
+            /bin/kill "$alarm" 2>/dev/null || :
+        fi
+        for mps in 1 0; do
+            CI_ENABLE_MPS="$mps" "$tool" >> "$log" 2>&1 &
+            probe=$!
+            ( /bin/sleep 90; /bin/kill -KILL "$probe" 2>/dev/null ) &
+            alarm=$!
+            wait "$probe"
+            /bin/echo "blur mps=$mps exit=$?" >> "$log"
+            /bin/kill "$alarm" 2>/dev/null || :
+        done
+    fi
     if [ -s /private/var/ngpu/test/share/icon-probe-path ]; then
         owner=$(/usr/bin/id -u)
         /bin/echo "icon service restart old=$(/usr/bin/pgrep -u "$owner" -x iconservicesagent | /usr/bin/tr '\n' ',')" >> "$log"
         /usr/bin/pkill -KILL -u "$owner" -x iconservicesagent 2>/dev/null || :
         /bin/sleep 1
         single=$(/bin/cat /private/var/ngpu/test/share/icon-probe-path)
+        tiling_cost_check=0
+        if [ "$(/bin/cat /private/var/ngpu/test/share/tiling-cost-check 2>/dev/null)" = 1 ]; then
+            tiling_cost_check=1
+        fi
         if [ "$single" = settings ]; then
-            CI_ENABLE_MPS=0 "$tool" --settings-icons /Users/Shared/unixnu-test/icons.png >> "$log" 2>&1 &
+            CI_ENABLE_MPS=0 NATIVE_METAL_TILING_CHECK="$tiling_cost_check" "$tool" --settings-icons /Users/Shared/unixnu-test/icons.png >> "$log" 2>&1 &
         else
-            CI_ENABLE_MPS=0 "$tool" --icon-symbols "$single" /Users/Shared/unixnu-test/icons.png >> "$log" 2>&1 &
+            CI_ENABLE_MPS=0 NATIVE_METAL_TILING_CHECK="$tiling_cost_check" "$tool" --icon-symbols "$single" /Users/Shared/unixnu-test/icons.png >> "$log" 2>&1 &
         fi
     else
         CI_ENABLE_MPS=0 "$tool" /Users/Shared/unixnu-test/icons.png >> "$log" 2>&1 &

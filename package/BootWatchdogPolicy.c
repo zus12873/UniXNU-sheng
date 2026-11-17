@@ -90,7 +90,7 @@ static int sheng_boot_setup_reset(proc_t p,uint64_t scratch) {
  return 0;
 }
 
-// One comma-separated label at *c into the policy as a disabled (true) or enabled (false) key; advances *c past it.
+// Append one label with its launchd disabled state and advance past the comma.
 static int append_job_state(const char **cursor,int disabled) {
  const char *c=*cursor,*e=c;while(*e && *e!=',')++e;
  if(e>c) {
@@ -101,6 +101,7 @@ static int append_job_state(const char **cursor,int disabled) {
  }
  *cursor=*e?e+1:e;return 0;
 }
+
 static int append_job(const char **cursor) {return append_job_state(cursor,1);}
 
 int sheng_boot_watchdog_policy(void *process, uint64_t scratch) {
@@ -111,8 +112,8 @@ int sheng_boot_watchdog_policy(void *process, uint64_t scratch) {
  if(!PE_parse_boot_argn("enable-jobs",enable_jobs,sizeof(enable_jobs)))enable_jobs[0]=0;enable_jobs[sizeof(enable_jobs)-1]=0;
  int lite=0;PE_parse_boot_argn("lite",&lite,sizeof(lite));if(lite!=1 && lite!=2)lite=0;
  if(enabled!=1)enabled=0;
- for(const char *c=jobs;*c;++c)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='.'||*c=='-'||*c==','))return EINVAL;
  for(const char *c=enable_jobs;*c;++c)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='.'||*c=='-'||*c==','))return EINVAL;
+ for(const char *c=jobs;*c;++c)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='.'||*c=='-'||*c==','))return EINVAL;
  int setup=0,reset=0;
  PE_parse_boot_argn("setup",&setup,sizeof(setup));
  PE_parse_boot_argn("data-reset",&reset,sizeof(reset));   // 2 = erase Data and show the Hello page; 1 = erase Data, Setup stays skipped

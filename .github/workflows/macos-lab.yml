@@ -3,6 +3,10 @@ name: sheng macOS lab
 on:
   workflow_dispatch:
     inputs:
+      core_ref:
+        description: UniXNU core branch or commit
+        type: string
+        default: main
       root_storage:
         description: Build the userdata root image
         type: boolean
@@ -34,11 +38,12 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 360
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      UNIXNU_IPSW_JOBS: 16
       HOMEBREW_NO_AUTO_UPDATE: 1
       GITHUB_TOKEN: ${{ github.token }}
       UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
       UNIXNU_LAB_PASSWORD: ${{ secrets.UNIXNU_LAB_PASSWORD }}
-      UNIXNU_MACOS_TEST: ${{ github.workspace }}/device/scripts/macos-lab
     steps:
       - name: Check out device sources
         uses: actions/checkout@v4
@@ -49,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU
-          ref: 21d683dff61c66f219f03ab9d8b9249026514788
+          ref: ${{ inputs.core_ref }}
           path: UniXNU
           submodules: recursive
       - name: Check out firmware sources
@@ -59,6 +64,9 @@ jobs:
           ref: 8156d2e54a9f57818dc8b415a1a7dc28ad9ba4be
           path: uefi-sheng
           submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
       - name: Restore build inputs
         id: build-cache
         uses: actions/cache/restore@v4
@@ -130,6 +138,7 @@ jobs:
           key: ${{ steps.kernel-sdk.outputs.key }}-${{ github.run_id }}
           restore-keys: ${{ steps.kernel-sdk.outputs.key }}-
           path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/xnu-inputs.json
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/xnu-work
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/fakeroot
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
@@ -144,14 +153,9 @@ jobs:
             python3 ../device/scripts/prepare-macos-install.py --reuse-policies
           fi
       - name: Build images
+        id: build-images
         working-directory: device
-        run: >-
-          scripts/package.sh --os macos-27 --uefi ../uefi-sheng
-          --kernel-arg autoreset=7200 --kernel-arg data-reset=1
-          --kernel-arg gpu-trace=1 --kernel-arg gpu-perf=1
-          --kernel-arg diag-export=6900 --kernel-arg diag=1
-          --kernel-arg log-gpu=1 --kernel-arg log-power=1
-          --kernel-arg log-sys=1 --kernel-arg log-display=1
+        run: scripts/package.sh --os macos-27 --uefi ../uefi-sheng
       - name: Publish shader inventory
         if: always()
         uses: actions/upload-artifact@v4
@@ -208,7 +212,7 @@ jobs:
             UniXNU/out/sheng/*/*/tree/build/sheng-source-storage/*.command.json
           retention-days: 1
       - name: Save build inputs
-        if: always() && steps.build-cache.outputs.cache-hit != 'true'
+        if: always() && steps.build-images.outcome == 'success' && steps.build-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           key: sheng-macos27-build-v1-${{ runner.os }}-${{ github.run_id }}
@@ -223,11 +227,12 @@ jobs:
             device/drivers/Ath12kWifi/deps
             device/.cache/firmware
       - name: Save kernel compile records
-        if: always() && steps.kernel-cache.outputs.cache-hit != 'true'
+        if: always() && steps.build-images.outcome == 'success' && steps.kernel-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           key: ${{ steps.kernel-sdk.outputs.key }}-${{ github.run_id }}
           path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/xnu-inputs.json
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/xnu-work
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/.cache/fakeroot
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree/build/xnu
