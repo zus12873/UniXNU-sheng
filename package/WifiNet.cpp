@@ -37,6 +37,7 @@ extern "C" {
 #include "nw_abi.h"
 #include "nw_control_endpoint.h"
 #include "WifiScan.h"
+static_assert(SHENG_WIFI_SCAN_FREQUENCIES == NW_WIFI_SCAN_FREQUENCIES_MAX, "the frequencies a scan request carries");
 
 #if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX
 // macOS: en0 is ShengEthernet (an IOEthernetController of the original IONetworkingFamily, ShengEthernet.cpp), which carries this
@@ -581,18 +582,27 @@ int apple80211(bool set, apple80211req &rq) {
         nw_wifi_status current; nw_wifi_status_get(&current);
         if (current.state >= NW_STA_AUTH) return EBUSY; // preserve pending teardown
       }
-      uint32_t ssidLength = 0, scanType = 0; const uint8_t *ssid = nullptr;
+      // The channels asked for go with it (WifiScan.h sheng_wifi_scan_frequencies): every band took longer than the scan is waited for.
+      uint32_t ssidLength = 0, scanType = 0, frequencies = 0, mhz[SHENG_WIFI_SCAN_FREQUENCIES]; const uint8_t *ssid = nullptr;
       if (type == kScanReq) {
-        if (copy_in(rq, out.raw, 0x80)) return EFAULT;
+        const uint32_t copied = SHENG_WIFI_SCAN_ONE_CHANNELS + SHENG_WIFI_SCAN_CHANNELS_READ * SHENG_WIFI_SCAN_CHANNEL_ENTRY;
+        if (copy_in(rq, out.raw, copied)) return EFAULT;
         memcpy(&ssidLength, out.raw + 16, 4); ssid = out.raw + 20; memcpy(&scanType, out.raw + 0x34, 4);
-        { static unsigned said; if (said++ < 16) log(6, "wifi-net: scan request: scan type %u, ssid length %u, %d networks held", scanType, ssidLength, nw_wifi_bss_count()); }
+        frequencies = sheng_wifi_scan_frequencies(out.raw, rq.req_len < copied ? rq.req_len : copied, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT,
+                                                  SHENG_WIFI_SCAN_ONE_CHANNELS, mhz);
+        { static unsigned said; if (said++ < 16) log(6, "wifi-net: scan request: scan type %u, ssid length %u, %u frequencies, %d networks held", scanType, ssidLength, frequencies, nw_wifi_bss_count()); }
       } else {
-        // Names the networks (WifiScan.h): what airportd sends for a saved network it counts as hidden. The names stay in out.raw.
-        static_assert(sizeof(sheng_wifi_scan_multiple) <= sizeof(Out) - SHENG_WIFI_SCAN_TYPE - 4, "parsed names fit behind the request");
-        if (copy_in(rq, out.raw, SHENG_WIFI_SCAN_TYPE + 4)) return EFAULT;
-        sheng_wifi_scan_multiple *names = reinterpret_cast<sheng_wifi_scan_multiple *>(out.raw + SHENG_WIFI_SCAN_TYPE + 4);
-        const int bad = sheng_wifi_scan_multiple_parse(out.raw, rq.req_len < SHENG_WIFI_SCAN_TYPE + 4 ? rq.req_len : SHENG_WIFI_SCAN_TYPE + 4, names);
-        { static unsigned said; if (said++ < 16) log(6, "wifi-net: named scan: len %u, %s, names %u, wildcard %u, scan type %u, %d networks held", rq.req_len, bad ? "refused" : "read", names->named, names->wildcard, names->scan_type, nw_wifi_bss_count()); }
+        // Names the networks (WifiScan.h): what airportd sends for a saved network it counts as hidden. The names stay in out.raw,
+        // behind the channels read.
+        const uint32_t copied = SHENG_WIFI_SCAN_MULTIPLE_CHANNELS + SHENG_WIFI_SCAN_CHANNELS_READ * SHENG_WIFI_SCAN_CHANNEL_ENTRY;
+        static_assert(0x600 >= SHENG_WIFI_SCAN_MULTIPLE_CHANNELS + SHENG_WIFI_SCAN_CHANNELS_READ * SHENG_WIFI_SCAN_CHANNEL_ENTRY &&
+                      0x600 + sizeof(sheng_wifi_scan_multiple) <= sizeof(Out), "parsed names fit behind the request");
+        if (copy_in(rq, out.raw, copied)) return EFAULT;
+        sheng_wifi_scan_multiple *names = reinterpret_cast<sheng_wifi_scan_multiple *>(out.raw + 0x600);
+        const uint32_t held = rq.req_len < copied ? rq.req_len : copied;
+        const int bad = sheng_wifi_scan_multiple_parse(out.raw, held, names);
+        if (!bad) frequencies = sheng_wifi_scan_frequencies(out.raw, held, SHENG_WIFI_SCAN_MULTIPLE_CHANNEL_COUNT, SHENG_WIFI_SCAN_MULTIPLE_CHANNELS, mhz);
+        { static unsigned said; if (said++ < 16) log(6, "wifi-net: named scan: len %u, %s, names %u, wildcard %u, scan type %u, %u frequencies, %d networks held", rq.req_len, bad ? "refused" : "read", names->named, names->wildcard, names->scan_type, frequencies, nw_wifi_bss_count()); }
         if (bad) return EINVAL;
         scanType = names->scan_type; sheng_wifi_scan_multiple_target(names, &ssid, &ssidLength);
       }
@@ -605,7 +615,8 @@ int apple80211(bool set, apple80211req &rq) {
         static unsigned answered; if (++answered <= 8 || answered % 64 == 0) log(6, "wifi-net: scan %u while joined: answered from the cache", answered);
         gScanning = 1; gScanCursor = 0; gResultsShown = 24; uint64_t at; clock_interval_to_deadline(2000, kMillisecondScale, &at); thread_call_enter_delayed(gCachedScan, at); return 0; }
       gScanning = 1; gScanCursor = 0; gResultsShown = 0;
-      int result = nw_wifi_scan(ssid && ssidLength && ssidLength <= 32 ? ssid : nullptr, ssid && ssidLength <= 32 ? ssidLength : 0);
+      int result = nw_wifi_scan_frequencies(ssid && ssidLength && ssidLength <= 32 ? ssid : nullptr, ssid && ssidLength <= 32 ? ssidLength : 0,
+                                            frequencies ? mhz : nullptr, frequencies);
       if (result) { __atomic_store_n(&gScanning, 0u, __ATOMIC_RELEASE); return ENETDOWN; }
       sheng_wifi_wake(); return 0; }
     case kAssociate: {

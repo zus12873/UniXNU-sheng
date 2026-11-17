@@ -111,6 +111,73 @@ static void malformed_requests_are_refused(void)
     CHECK(ssid == NULL && length == 0);
 }
 
+// The channels in a request: {version, channel, flags} at 12 bytes each; flags 0x8 2.4 GHz, 0x10 5 GHz (WifiNet.cpp fill_channel).
+static void put_channels(uint8_t *req, uint32_t count_at, uint32_t list_at, const uint32_t (*ch)[2], unsigned n)
+{
+    put_u32(req + count_at, n);
+    for (unsigned i = 0; i < n; ++i) {
+        put_u32(req + list_at + i * 12, 1);
+        put_u32(req + list_at + i * 12 + 4, ch[i][0]);
+        put_u32(req + list_at + i * 12 + 8, 0x2 | ch[i][1]);
+    }
+}
+
+// airportd's auto-join scan: two channels. Scanning every band instead took about 16 s, past the 12 s the scan is waited for.
+static void named_scan_channels_become_frequencies(void)
+{
+    static uint8_t req[SHENG_WIFI_SCAN_MULTIPLE_BYTES];
+    static const char *const names[] = {"a", "b"};
+    request(req, names, 2, 1, 1);
+    static const uint32_t two[][2] = {{36, 0x10}, {6, 0x8}};
+    put_channels(req, SHENG_WIFI_SCAN_MULTIPLE_CHANNEL_COUNT, SHENG_WIFI_SCAN_MULTIPLE_CHANNELS, two, 2);
+    uint32_t mhz[SHENG_WIFI_SCAN_FREQUENCIES];
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_MULTIPLE_CHANNEL_COUNT, SHENG_WIFI_SCAN_MULTIPLE_CHANNELS, mhz) == 2);
+    CHECK(mhz[0] == 5180 && mhz[1] == 2437);
+}
+
+static void single_scan_channels_become_frequencies(void)
+{
+    static uint8_t req[0x80 + 64 * 12];
+    memset(req, 0, sizeof req);
+    static const uint32_t nine[][2] = {{36, 0x10}, {40, 0x10}, {44, 0x10}, {48, 0x10}, {149, 0x10}, {153, 0x10}, {157, 0x10}, {161, 0x10}, {165, 0x10}};
+    put_channels(req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, nine, 9);
+    uint32_t mhz[SHENG_WIFI_SCAN_FREQUENCIES];
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 9);
+    CHECK(mhz[0] == 5180 && mhz[4] == 5745 && mhz[8] == 5825);
+    static const uint32_t edge[][2] = {{1, 0x8}, {13, 0x8}, {14, 0x8}};
+    put_channels(req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, edge, 3);
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 3);
+    CHECK(mhz[0] == 2412 && mhz[1] == 2472 && mhz[2] == 2484);
+}
+
+// Repeated channels once; a band this driver does not report (6 GHz) left out; none left, or a list that does not fit, is every band.
+static void channel_lists_are_cleaned(void)
+{
+    static uint8_t req[0x80 + 64 * 12];
+    uint32_t mhz[SHENG_WIFI_SCAN_FREQUENCIES];
+    memset(req, 0, sizeof req);
+    static const uint32_t repeated[][2] = {{6, 0x8}, {6, 0x8}, {36, 0x10}, {37, 0x2000}};
+    put_channels(req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, repeated, 4);
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 2);
+    CHECK(mhz[0] == 2437 && mhz[1] == 5180);
+    static const uint32_t six[][2] = {{37, 0x2000}};
+    put_channels(req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, six, 1);
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 0);
+    put_u32(req + SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, 0);
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 0);
+    // more entries than are read, a list past the bytes copied, more distinct channels than the kernel takes
+    put_u32(req + SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_CHANNELS_READ + 1);
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 0);
+    static const uint32_t two[][2] = {{1, 0x8}, {2, 0x8}};
+    put_channels(req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, two, 2);
+    CHECK(sheng_wifi_scan_frequencies(req, SHENG_WIFI_SCAN_ONE_CHANNELS + 12, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 0);
+    CHECK(sheng_wifi_scan_frequencies(NULL, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 0);
+    uint32_t many[SHENG_WIFI_SCAN_FREQUENCIES + 1][2];
+    for (unsigned i = 0; i < SHENG_WIFI_SCAN_FREQUENCIES + 1; ++i) {many[i][0] = 36 + 4 * i; many[i][1] = 0x10;}
+    put_channels(req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, (const uint32_t (*)[2])many, SHENG_WIFI_SCAN_FREQUENCIES + 1);
+    CHECK(sheng_wifi_scan_frequencies(req, sizeof req, SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT, SHENG_WIFI_SCAN_ONE_CHANNELS, mhz) == 0);
+}
+
 int main(void)
 {
     caps_allow_named_scans();
@@ -118,6 +185,9 @@ int main(void)
     one_name_without_wildcard_is_directed();
     cached_type_is_kept();
     malformed_requests_are_refused();
+    named_scan_channels_become_frequencies();
+    single_scan_channels_become_frequencies();
+    channel_lists_are_cleaned();
     printf("checks %u\n", checks);
     return 0;
 }

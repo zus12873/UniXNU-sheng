@@ -75,4 +75,49 @@ static inline void sheng_wifi_scan_multiple_target(const struct sheng_wifi_scan_
     *length = 0;
 }
 
+
+// The channels a scan asks for (both requests, as __getScanData fills them): request 10 has their count at 0x44 and the list from
+// 0x48, request 86 at 0x210 and from 0x214; 12 bytes each {version, channel, flags}, flags 0x8 2.4 GHz and 0x10 5 GHz (WifiNet.cpp
+// fill_channel). They go to the radio as MHz (Ath12kWifi nw_wifi_scan_frequencies, at most 32): airportd's auto-join scans name two to
+// eighteen, and a scan of every band instead took about 15.7 s on WCN7850, past the 12 s it is waited for, so each one ended empty.
+#define SHENG_WIFI_SCAN_ONE_CHANNEL_COUNT 0x44u
+#define SHENG_WIFI_SCAN_ONE_CHANNELS 0x48u
+#define SHENG_WIFI_SCAN_MULTIPLE_CHANNEL_COUNT 0x210u
+#define SHENG_WIFI_SCAN_MULTIPLE_CHANNELS 0x214u
+#define SHENG_WIFI_SCAN_CHANNEL_ENTRY 12u
+#define SHENG_WIFI_SCAN_CHANNELS_READ 64u   // entries read; a longer list is every band anyway
+#define SHENG_WIFI_SCAN_FREQUENCIES 32u     // Ath12kWifi NW_WIFI_SCAN_FREQUENCIES_MAX
+#define SHENG_WIFI_CHANNEL_2GHZ 0x8u
+#define SHENG_WIFI_CHANNEL_5GHZ 0x10u
+
+// MHz of a channel this driver reports (2.4 and 5 GHz), 0 for another band.
+static inline uint32_t sheng_wifi_channel_mhz(uint32_t channel, uint32_t flags)
+{
+    if (flags & SHENG_WIFI_CHANNEL_2GHZ) return channel == 14 ? 2484 : channel >= 1 && channel <= 13 ? 2407 + 5 * channel : 0;
+    if (flags & SHENG_WIFI_CHANNEL_5GHZ) return channel >= 1 && channel <= 196 ? 5000 + 5 * channel : 0;
+    return 0;
+}
+
+// The distinct frequencies asked for, in order, into mhz; 0 for every band: no list, none this driver reports, more entries than
+// SHENG_WIFI_SCAN_CHANNELS_READ or distinct frequencies than SHENG_WIFI_SCAN_FREQUENCIES, or a list past the size copied.
+static inline uint32_t sheng_wifi_scan_frequencies(const uint8_t *req, size_t size, uint32_t count_at, uint32_t list_at,
+                                                   uint32_t mhz[SHENG_WIFI_SCAN_FREQUENCIES])
+{
+    if (!req || size < (size_t)count_at + 4u) return 0;
+    const uint32_t count = sheng_wifi_scan_u32(req + count_at);
+    if (!count || count > SHENG_WIFI_SCAN_CHANNELS_READ || size < (size_t)list_at + (size_t)count * SHENG_WIFI_SCAN_CHANNEL_ENTRY) return 0;
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint8_t *entry = req + list_at + i * SHENG_WIFI_SCAN_CHANNEL_ENTRY;
+        const uint32_t f = sheng_wifi_channel_mhz(sheng_wifi_scan_u32(entry + 4), sheng_wifi_scan_u32(entry + 8));
+        if (!f) continue;
+        uint32_t seen = 0;
+        for (uint32_t k = 0; k < n; ++k) seen |= mhz[k] == f;
+        if (seen) continue;
+        if (n == SHENG_WIFI_SCAN_FREQUENCIES) return 0;
+        mhz[n++] = f;
+    }
+    return n;
+}
+
 #endif
